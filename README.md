@@ -22,11 +22,15 @@ pkg update && pkg upgrade
     ```
 
 2.  **Dapatkan Kode Bot:**
-    Salin semua file dari proyek ini (`bot.py`, `start.sh`, `stop.sh`, `README.md`) ke dalam sebuah folder di Termux Anda. Anda bisa menggunakan `git clone` jika ini adalah repositori Git.
+    Gunakan `git clone` untuk menyalin semua file proyek ke Termux. Ganti `URL_REPOSITORI_ANDA` dengan URL Git yang sebenarnya.
+    ```bash
+    git clone URL_REPOSITORI_ANDA telegram-bot
+    ```
 
 3.  **Instal Library Python:**
-    Pindah ke direktori tempat Anda menyimpan file bot, lalu instal dependensi yang diperlukan.
+    Pindah ke direktori bot yang baru saja dibuat, lalu instal dependensi yang diperlukan.
     ```bash
+    cd telegram-bot
     pip install python-telegram-bot "python-telegram-bot[ext]" --pre
     pip install git+https://github.com/yt-dlp/yt-dlp.git
     ```
