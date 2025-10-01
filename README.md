@@ -47,6 +47,17 @@ pkg update && pkg upgrade
     export TELEGRAM_TOKEN='GANTI_DENGAN_TOKEN_ANDA'
     ```
 
+3.  **(Opsional) Atur Perintah Bot:**
+    Untuk membuat bot lebih mudah digunakan, atur daftar perintah di `@BotFather`.
+    - Kirim perintah `/mybots`, pilih bot Anda, lalu pilih "Edit Bot" -> "Edit Commands".
+    - Salin dan tempel teks berikut:
+    ```
+    start - ✨ Memulai bot
+    help - 🤔 Menampilkan bantuan
+    search - 🔎 Mencari 5 video/lagu teratas
+    song - 🎵 Mengunduh lagu dari hasil teratas
+    ```
+
 ## Menjalankan Bot
 Untuk kemudahan, telah disediakan skrip untuk menjalankan dan menghentikan bot.
 
