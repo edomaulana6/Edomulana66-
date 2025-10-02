@@ -144,15 +144,21 @@ async def help_command(update: Update, context: CallbackContext) -> None:
 # --- Download and URL handling ---
 
 async def handle_url(update: Update, context: CallbackContext) -> None:
-    url = update.message.text.strip()
-    if not re.match(r'https?://', url):
-        await update.message.reply_text(
-            "Sepertinya itu bukan perintah atau URL yang valid. "
-            "Jika Anda ingin memulai pencarian, gunakan `/search` atau `/song`."
-        )
+    """Handles messages containing a URL entity."""
+    # The filter ensures we have at least one URL entity. We'll take the first one.
+    entities = update.message.entities
+    url_entity = next((e for e in entities if e.type in ("url", "text_link")), None)
+
+    if not url_entity:
+        # This should not happen due to the filter, but as a safeguard:
         return
 
-    message = await update.message.reply_text("🔎 Memproses URL...")
+    if url_entity.type == "text_link":
+        url = url_entity.url
+    else:
+        url = update.message.text[url_entity.offset : url_entity.offset + url_entity.length]
+
+    message = await update.message.reply_text(f"🔎 Memproses URL: {url}...")
     try:
         with yt_dlp.YoutubeDL({'quiet': True, 'noplaylist': True}) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -267,8 +273,8 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CallbackQueryHandler(download_button, pattern="^dl:"))
-    # A low-priority handler for URLs or invalid commands
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url), group=1)
+    # This handler is now specific to URLs, so it won't conflict with conversations.
+    application.add_handler(MessageHandler(filters.Entity("url") | filters.Entity("text_link"), handle_url))
 
     application.run_polling()
 
