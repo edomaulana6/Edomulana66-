@@ -29,9 +29,13 @@ GET_TITLE = 0
 async def perform_search(query: str, update: Update, context: CallbackContext):
     """Performs a more resilient YouTube search and sends results."""
     await update.message.reply_text(f"🔎 Mencari 5 teratas untuk: *{query}*...", parse_mode='Markdown')
+    # By removing 'extract_flat', we ask for full metadata, which is more reliable
+    # even if slightly slower.
     ydl_opts = {
-        'format': 'bestaudio/best', 'noplaylist': True, 'quiet': True,
-        'default_search': 'ytsearch5', 'extract_flat': 'in_playlist',
+        'format': 'bestaudio/best',
+        'noplaylist': True,
+        'quiet': True,
+        'default_search': 'ytsearch5',
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
