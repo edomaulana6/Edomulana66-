@@ -201,9 +201,11 @@ async def download_file(identifier: str, format_choice: str, update: Update, con
         'progress_hooks': [lambda d: None],
     }
     if format_choice == 'audio':
+        # Download best audio-only format (usually m4a or webm)
         ydl_opts['format'] = 'bestaudio/best'
     else:
-        ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+        # Download the best available single file containing both video and audio
+        ydl_opts['format'] = 'best'
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info_dict = ydl.extract_info(url, download=True)
