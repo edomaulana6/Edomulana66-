@@ -24,8 +24,9 @@ else
     echo "Proses dengan PID $PID tidak ditemukan, mungkin sudah berhenti."
 fi
 
-# Hapus file PID dan log
+# Hapus file PID, log, dan persistensi
 rm -f $PID_FILE
 rm -f $LOG_FILE
+rm -f bot_persistence
 
 echo "Pembersihan selesai."

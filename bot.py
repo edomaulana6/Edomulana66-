@@ -11,6 +11,7 @@ from telegram.ext import (
     CallbackContext,
     CallbackQueryHandler,
     ConversationHandler,
+    PicklePersistence,
 )
 import yt_dlp
 
@@ -227,7 +228,11 @@ def main() -> None:
         logger.error("TELEGRAM_TOKEN environment variable not set.")
         return
 
-    application = Application.builder().token(token).build()
+    # --- Persistensi ---
+    # Membuat objek persistensi untuk menyimpan data bot
+    persistence = PicklePersistence(filepath="bot_persistence")
+
+    application = Application.builder().token(token).persistence(persistence).build()
 
     # Conversation handlers
     search_conv = ConversationHandler(
