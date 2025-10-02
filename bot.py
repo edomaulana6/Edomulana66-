@@ -20,8 +20,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# States for conversation
-SEARCH_TITLE, SEARCH_ARTIST, SONG_TITLE, SONG_ARTIST = range(4)
+# States for the simplified one-step conversation
+GET_TITLE = 0
 
 # --- Helper Functions ---
 
@@ -72,7 +72,7 @@ async def perform_song_download(query: str, update: Update, context: CallbackCon
         else:
             await update.message.reply_text(caption, parse_mode='Markdown')
 
-        await message.delete() # Clean up the "Searching..." message
+        await message.delete()
         await download_file(info.get('id'), 'audio', update, context)
     except Exception as e:
         logger.error(f"Error during song download: {e}")
@@ -80,47 +80,30 @@ async def perform_song_download(query: str, update: Update, context: CallbackCon
 
 # --- Conversation Handlers ---
 
-# /search conversation
 async def search_start(update: Update, context: CallbackContext) -> int:
-    await update.message.reply_text("Tentu, mari kita cari beberapa lagu. Siapa nama artisnya? (Ketik /cancel untuk batal)")
-    return SEARCH_ARTIST
+    """Starts the /search conversation by asking for the title."""
+    await update.message.reply_text("Apa judul lagu yang ingin Anda cari? (Ketik /cancel untuk batal)")
+    return GET_TITLE
 
-async def search_get_artist(update: Update, context: CallbackContext) -> int:
-    context.user_data['artist'] = update.message.text
-    await update.message.reply_text("Oke, artis dicatat. Sekarang, apa judul lagunya?")
-    return SEARCH_TITLE
+async def song_start(update: Update, context: CallbackContext) -> int:
+    """Starts the /song conversation by asking for the title."""
+    await update.message.reply_text("Tentu, apa judul lagu yang ingin diunduh? (Ketik /cancel untuk batal)")
+    return GET_TITLE
 
-async def search_get_title_and_execute(update: Update, context: CallbackContext) -> int:
-    artist = context.user_data.pop('artist', '')
-    title = update.message.text
-    query = f"{artist} {title}".strip()
+async def get_title_and_search(update: Update, context: CallbackContext) -> int:
+    """Gets title, performs search, and ends conversation."""
+    query = update.message.text
     await perform_search(query, update, context)
     return ConversationHandler.END
 
-# /song conversation
-async def song_start(update: Update, context: CallbackContext) -> int:
-    await update.message.reply_text("Oke, saya akan carikan lagunya. Siapa nama artisnya? (Ketik /cancel untuk batal)")
-    return SONG_ARTIST
-
-async def song_get_artist(update: Update, context: CallbackContext) -> int:
-    context.user_data['artist'] = update.message.text
-    await update.message.reply_text("Artis dicatat. Sekarang, apa judul lagunya?")
-    return SONG_TITLE
-
-async def song_get_title_and_execute(update: Update, context: CallbackContext) -> int:
-    artist = context.user_data.pop('artist', '')
-    title = update.message.text
-    query = f"{artist} {title}".strip()
+async def get_title_and_download(update: Update, context: CallbackContext) -> int:
+    """Gets title, performs download, and ends conversation."""
+    query = update.message.text
     await perform_song_download(query, update, context)
     return ConversationHandler.END
 
-# General conversation commands
 async def cancel(update: Update, context: CallbackContext) -> int:
     """Cancels and ends the conversation."""
-    # Specifically remove conversation-related data, leaving URL download data intact.
-    if 'artist' in context.user_data:
-        del context.user_data['artist']
-
     await update.message.reply_text("Pencarian dibatalkan.")
     return ConversationHandler.END
 
@@ -130,7 +113,6 @@ async def start(update: Update, context: CallbackContext) -> None:
     user = update.effective_user
     await update.message.reply_html(
         f"👋 Halo {user.mention_html()}!\n\n"
-        "Bot ini sekarang lebih interaktif.\n"
         "Gunakan `/search` atau `/song` untuk memulai pencarian lagu.\n"
         "Anda juga bisa mengirimkan link URL langsung untuk diunduh."
     )
@@ -148,13 +130,9 @@ async def help_command(update: Update, context: CallbackContext) -> None:
 
 async def handle_url(update: Update, context: CallbackContext) -> None:
     """Handles messages containing a URL entity."""
-    # The filter ensures we have at least one URL entity. We'll take the first one.
     entities = update.message.entities
     url_entity = next((e for e in entities if e.type in ("url", "text_link")), None)
-
-    if not url_entity:
-        # This should not happen due to the filter, but as a safeguard:
-        return
+    if not url_entity: return
 
     if url_entity.type == "text_link":
         url = url_entity.url
@@ -201,7 +179,6 @@ async def download_button(update: Update, context: CallbackContext) -> None:
     original_message = await query.edit_message_text(text=f"⏳ Mempersiapkan unduhan {format_choice}...")
     try:
         await download_file(identifier, format_choice, update, context)
-        # Delete the "downloading..." message upon completion for a cleaner interface.
         await original_message.delete()
     except Exception as e:
         logger.error(f"Error during download_file call: {e}")
@@ -220,17 +197,12 @@ async def download_file(identifier: str, format_choice: str, update: Update, con
     file_path_template = os.path.join(download_dir, f'{sanitized_title}.%(ext)s')
 
     ydl_opts = {
-        'outtmpl': file_path_template,
-        'noplaylist': True,
-        'quiet': True,
+        'outtmpl': file_path_template, 'noplaylist': True, 'quiet': True,
         'progress_hooks': [lambda d: None],
     }
-
     if format_choice == 'audio':
-        # Download best audio directly without re-encoding to MP3. This is much faster.
-        # The format is usually M4A.
         ydl_opts['format'] = 'bestaudio/best'
-    else: # video
+    else:
         ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -258,18 +230,12 @@ def main() -> None:
     # Conversation handlers
     search_conv = ConversationHandler(
         entry_points=[CommandHandler("search", search_start)],
-        states={
-            SEARCH_ARTIST: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_get_artist)],
-            SEARCH_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_get_title_and_execute)],
-        },
+        states={ GET_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_title_and_search)] },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
     song_conv = ConversationHandler(
         entry_points=[CommandHandler("song", song_start)],
-        states={
-            SONG_ARTIST: [MessageHandler(filters.TEXT & ~filters.COMMAND, song_get_artist)],
-            SONG_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, song_get_title_and_execute)],
-        },
+        states={ GET_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_title_and_download)] },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
@@ -280,7 +246,6 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CallbackQueryHandler(download_button, pattern="^dl:"))
-    # This handler is now specific to URLs, so it won't conflict with conversations.
     application.add_handler(MessageHandler(filters.Entity("url") | filters.Entity("text_link"), handle_url))
 
     application.run_polling()

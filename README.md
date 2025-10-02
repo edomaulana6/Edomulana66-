@@ -4,8 +4,8 @@ Bot Telegram ini memungkinkan Anda untuk mengunduh video dan audio dari YouTube 
 
 ## Fitur
 - **Unduh dari URL**: Kirimkan link apa saja untuk mendapatkan pilihan unduhan (audio/video).
-- **Pencarian Interaktif (Top 5)**: Gunakan `/search` untuk memulai alur percakapan. Bot akan menanyakan nama artis dan judul lagu sebelum menampilkan 5 hasil teratas.
-- **Unduh Lagu Interaktif**: Gunakan `/song` untuk memulai alur percakapan yang akan memandu Anda untuk mengunduh audio dari hasil pencarian teratas.
+- **Pencarian Interaktif (Top 5)**: Gunakan `/search` untuk memulai pencarian. Bot akan menanyakan judul lagu yang Anda inginkan.
+- **Unduh Lagu Interaktif**: Gunakan `/song` untuk memulai proses unduhan. Bot akan menanyakan judul lagu yang ingin diunduh.
 - **Berjalan di Latar Belakang**: Dilengkapi dengan skrip untuk memulai dan menghentikan bot di latar belakang.
 
 ## Persiapan Awal di Termux
