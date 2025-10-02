@@ -27,7 +27,7 @@ GET_TITLE = 0
 # --- Helper Functions ---
 
 async def perform_search(query: str, update: Update, context: CallbackContext):
-    """Performs the actual YouTube search and sends results."""
+    """Performs a more resilient YouTube search and sends results."""
     await update.message.reply_text(f"🔎 Mencari 5 teratas untuk: *{query}*...", parse_mode='Markdown')
     ydl_opts = {
         'format': 'bestaudio/best', 'noplaylist': True, 'quiet': True,
@@ -42,23 +42,34 @@ async def perform_search(query: str, update: Update, context: CallbackContext):
                 await update.message.reply_text("Tidak ada lagu (durasi di bawah 10 menit) yang ditemukan.")
                 return
 
-            await update.message.reply_text(f"Berikut {len(videos)} hasil teratas:")
+            await update.message.reply_text("Menampilkan hasil yang valid:")
+            sent_count = 0
             for video in videos:
-                video_id = video.get('id')
-                title = video.get('title', 'Tanpa Judul')
-                duration = f"{video.get('duration', 0) // 60}:{video.get('duration', 0) % 60:02d}"
-                caption = f"🎵 *{title}*\n⏱️ Durasi: {duration}"
-                keyboard = InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🎧 Audio", callback_data=f"dl:audio:id:{video_id}"),
-                    InlineKeyboardButton("🎬 Video", callback_data=f"dl:video:id:{video_id}"),
-                ]])
-                if thumbnail := video.get('thumbnail'):
-                    await update.message.reply_photo(photo=thumbnail, caption=caption, reply_markup=keyboard, parse_mode='Markdown')
-                else:
-                    await update.message.reply_text(caption, reply_markup=keyboard, parse_mode='Markdown')
+                try:
+                    video_id = video.get('id')
+                    title = video.get('title', 'Tanpa Judul')
+                    duration = f"{video.get('duration', 0) // 60}:{video.get('duration', 0) % 60:02d}"
+                    caption = f"🎵 *{title}*\n⏱️ Durasi: {duration}"
+                    keyboard = InlineKeyboardMarkup([[
+                        InlineKeyboardButton("🎧 Audio", callback_data=f"dl:audio:id:{video_id}"),
+                        InlineKeyboardButton("🎬 Video", callback_data=f"dl:video:id:{video_id}"),
+                    ]])
+                    if thumbnail := video.get('thumbnail'):
+                        await update.message.reply_photo(photo=thumbnail, caption=caption, reply_markup=keyboard, parse_mode='Markdown')
+                    else:
+                        await update.message.reply_text(caption, reply_markup=keyboard, parse_mode='Markdown')
+                    sent_count += 1
+                except Exception as e:
+                    logger.error(f"Failed to process and send one search result ({video.get('id')}): {e}")
+                    # Skip this item and continue with the next one
+                    continue
+
+            if sent_count == 0:
+                await update.message.reply_text("Maaf, semua hasil pencarian gagal ditampilkan. Mungkin ada masalah dengan data dari YouTube.")
+
     except Exception as e:
-        logger.error(f"Error during search: {e}")
-        await update.message.reply_text("Maaf, terjadi kesalahan saat melakukan pencarian.")
+        logger.error(f"Error during initial yt-dlp search: {e}")
+        await update.message.reply_text("Maaf, terjadi kesalahan fatal saat melakukan pencarian.")
 
 async def perform_song_download(query: str, update: Update, context: CallbackContext):
     """Finds the top song on YouTube and sends it as audio."""
