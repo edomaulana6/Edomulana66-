@@ -3,7 +3,15 @@ import os
 import re
 import uuid
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    CallbackContext,
+    CallbackQueryHandler,
+    ConversationHandler,
+)
 import yt_dlp
 
 # Enable logging
@@ -12,49 +20,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- Command Handlers ---
+# States for conversation
+SEARCH_TITLE, SEARCH_ARTIST, SONG_TITLE, SONG_ARTIST = range(4)
 
-async def start(update: Update, context: CallbackContext) -> None:
-    """Sends a welcome message when the /start command is issued."""
-    user = update.effective_user
-    welcome_message = (
-        f"👋 Halo {user.mention_html()}!\n\n"
-        "Selamat datang di bot pengunduh YouTube.\n\n"
-        "Berikut perintah yang bisa Anda gunakan:\n"
-        "• Kirimkan saya link YouTube untuk mengunduh video atau audio.\n"
-        "• `/search <judul>` - Mencari 5 video teratas di YouTube.\n"
-        "• `/song <judul>` - Langsung mengunduh lagu dari hasil teratas.\n\n"
-        "Gunakan /help untuk melihat pesan ini lagi."
-    )
-    await update.message.reply_html(welcome_message)
+# --- Helper Functions ---
 
-async def help_command(update: Update, context: CallbackContext) -> None:
-    """Sends a help message when the /help command is issued."""
-    help_message = (
-        "🤔 *Butuh Bantuan?*\n\n"
-        "Ini yang bisa saya lakukan:\n\n"
-        "1. *Unduh dari URL*:\n"
-        "   Kirimkan saja URL dari YouTube (atau situs lain yang didukung), dan saya akan memberi Anda pilihan untuk mengunduh sebagai video atau audio.\n\n"
-        "2. *Pencarian Detail (Top 5)*:\n"
-        "   Gunakan perintah `/search <judul lagu>`.\n"
-        "   Contoh: `/search Alan Walker Faded`\n"
-        "   Saya akan menampilkan 5 hasil teratas lengkap dengan tombol unduhan.\n\n"
-        "3. *Unduh Cepat (Lagu)*:\n"
-        "   Gunakan perintah `/song <judul lagu>`.\n"
-        "   Contoh: `/song Alan Walker Faded`\n"
-        "   Saya akan otomatis mencari, mengunduh, dan mengirimkan file audio dari hasil teratas."
-    )
-    await update.message.reply_markdown(help_message)
-
-async def search(update: Update, context: CallbackContext) -> None:
-    """Searches YouTube for top 5 videos based on a query."""
-    query = " ".join(context.args)
-    if not query:
-        await update.message.reply_text("Silakan berikan judul untuk dicari. Contoh: `/search Alan Walker Faded`")
-        return
-
-    await update.message.reply_text(f"🔎 Mencari lagu untuk: *{query}*...", parse_mode='Markdown')
-
+async def perform_search(query: str, update: Update, context: CallbackContext):
+    """Performs the actual YouTube search and sends results."""
+    await update.message.reply_text(f"🔎 Mencari 5 teratas untuk: *{query}*...", parse_mode='Markdown')
     ydl_opts = {
         'format': 'bestaudio/best', 'noplaylist': True, 'quiet': True,
         'default_search': 'ytsearch5', 'extract_flat': 'in_playlist',
@@ -68,6 +41,7 @@ async def search(update: Update, context: CallbackContext) -> None:
                 await update.message.reply_text("Tidak ada lagu (durasi di bawah 10 menit) yang ditemukan.")
                 return
 
+            await update.message.reply_text(f"Berikut {len(videos)} hasil teratas:")
             for video in videos:
                 video_id = video.get('id')
                 title = video.get('title', 'Tanpa Judul')
@@ -85,13 +59,8 @@ async def search(update: Update, context: CallbackContext) -> None:
         logger.error(f"Error during search: {e}")
         await update.message.reply_text("Maaf, terjadi kesalahan saat melakukan pencarian.")
 
-async def song(update: Update, context: CallbackContext) -> None:
+async def perform_song_download(query: str, update: Update, context: CallbackContext):
     """Finds the top song on YouTube and sends it as audio."""
-    query = " ".join(context.args)
-    if not query:
-        await update.message.reply_text("Silakan berikan judul lagu. Contoh: `/song Alan Walker Faded`")
-        return
-
     message = await update.message.reply_text(f"🔎 Mencari lagu teratas untuk: *{query}*...", parse_mode='Markdown')
     try:
         with yt_dlp.YoutubeDL({'default_search': 'ytsearch1', 'quiet': True}) as ydl:
@@ -103,16 +72,84 @@ async def song(update: Update, context: CallbackContext) -> None:
         else:
             await update.message.reply_text(caption, parse_mode='Markdown')
 
+        await message.delete() # Clean up the "Searching..." message
         await download_file(info.get('id'), 'audio', update, context)
     except Exception as e:
-        logger.error(f"Error during /song command: {e}")
+        logger.error(f"Error during song download: {e}")
         await message.edit_text("Maaf, terjadi kesalahan saat mencari atau mengunduh lagu.")
 
+# --- Conversation Handlers ---
+
+# /search conversation
+async def search_start(update: Update, context: CallbackContext) -> int:
+    await update.message.reply_text("Tentu, mari kita cari beberapa lagu. Siapa nama artisnya? (Ketik /cancel untuk batal)")
+    return SEARCH_ARTIST
+
+async def search_get_artist(update: Update, context: CallbackContext) -> int:
+    context.user_data['artist'] = update.message.text
+    await update.message.reply_text("Oke, artis dicatat. Sekarang, apa judul lagunya?")
+    return SEARCH_TITLE
+
+async def search_get_title_and_execute(update: Update, context: CallbackContext) -> int:
+    artist = context.user_data.pop('artist', '')
+    title = update.message.text
+    query = f"{artist} {title}".strip()
+    await perform_search(query, update, context)
+    return ConversationHandler.END
+
+# /song conversation
+async def song_start(update: Update, context: CallbackContext) -> int:
+    await update.message.reply_text("Oke, saya akan carikan lagunya. Siapa nama artisnya? (Ketik /cancel untuk batal)")
+    return SONG_ARTIST
+
+async def song_get_artist(update: Update, context: CallbackContext) -> int:
+    context.user_data['artist'] = update.message.text
+    await update.message.reply_text("Artis dicatat. Sekarang, apa judul lagunya?")
+    return SONG_TITLE
+
+async def song_get_title_and_execute(update: Update, context: CallbackContext) -> int:
+    artist = context.user_data.pop('artist', '')
+    title = update.message.text
+    query = f"{artist} {title}".strip()
+    await perform_song_download(query, update, context)
+    return ConversationHandler.END
+
+# General conversation commands
+async def cancel(update: Update, context: CallbackContext) -> int:
+    """Cancels and ends the conversation."""
+    await update.message.reply_text("Pencarian dibatalkan.")
+    context.user_data.clear()
+    return ConversationHandler.END
+
+# --- Standard Command Handlers ---
+
+async def start(update: Update, context: CallbackContext) -> None:
+    user = update.effective_user
+    await update.message.reply_html(
+        f"👋 Halo {user.mention_html()}!\n\n"
+        "Bot ini sekarang lebih interaktif.\n"
+        "Gunakan `/search` atau `/song` untuk memulai pencarian lagu.\n"
+        "Anda juga bisa mengirimkan link URL langsung untuk diunduh."
+    )
+
+async def help_command(update: Update, context: CallbackContext) -> None:
+    await update.message.reply_markdown(
+        "*Bantuan Perintah*\n\n"
+        "`/search` - Memulai pencarian interaktif untuk 5 lagu teratas.\n"
+        "`/song` - Memulai pencarian interaktif untuk mengunduh lagu teratas.\n"
+        "`/cancel` - Membatalkan proses pencarian yang sedang berjalan.\n\n"
+        "Anda juga bisa mengirimkan URL YouTube (atau situs lain) langsung ke saya untuk mendapatkan pilihan unduhan."
+    )
+
+# --- Download and URL handling ---
+
 async def handle_url(update: Update, context: CallbackContext) -> None:
-    """Handles messages containing a URL."""
     url = update.message.text.strip()
     if not re.match(r'https?://', url):
-        await update.message.reply_text("Tolong kirimkan URL yang valid.")
+        await update.message.reply_text(
+            "Sepertinya itu bukan perintah atau URL yang valid. "
+            "Jika Anda ingin memulai pencarian, gunakan `/search` atau `/song`."
+        )
         return
 
     message = await update.message.reply_text("🔎 Memproses URL...")
@@ -139,10 +176,8 @@ async def handle_url(update: Update, context: CallbackContext) -> None:
         await message.edit_text("Gagal memproses URL. Pastikan link tersebut didukung.")
 
 async def download_button(update: Update, context: CallbackContext) -> None:
-    """Handles the download button press."""
     query = update.callback_query
     await query.answer()
-
     try:
         _, format_choice, source_type, value = query.data.split(':', 3)
     except ValueError:
@@ -154,30 +189,24 @@ async def download_button(update: Update, context: CallbackContext) -> None:
         await query.edit_message_text("❌ Link unduhan sudah kedaluwarsa. Silakan kirim ulang URL atau lakukan pencarian lagi.")
         return
 
-    await query.edit_message_text(text=f"⏳ Mempersiapkan unduhan {format_choice}...")
+    original_message = await query.edit_message_text(text=f"⏳ Mempersiapkan unduhan {format_choice}...")
     try:
         await download_file(identifier, format_choice, update, context)
-        await query.edit_message_text(text=f"✅ Unduhan {format_choice} selesai!")
+        await original_message.edit_text(text=f"✅ Unduhan {format_choice} selesai!")
     except Exception as e:
         logger.error(f"Error during download_file call: {e}")
-        await query.edit_message_text(text="❌ Gagal mengunduh file.")
+        await original_message.edit_text(text="❌ Gagal mengunduh file.")
 
 async def download_file(identifier: str, format_choice: str, update: Update, context: CallbackContext):
-    """Downloads the file using yt-dlp and sends it."""
     url = identifier if re.match(r'https?://', identifier) else f"https://www.youtube.com/watch?v={identifier}"
-
     download_dir = 'downloads'
     os.makedirs(download_dir, exist_ok=True)
 
-    # Sanitize title for filename
-    pre_info_opts = {'quiet': True, 'extract_flat': True}
-    with yt_dlp.YoutubeDL(pre_info_opts) as ydl:
+    with yt_dlp.YoutubeDL({'quiet': True, 'extract_flat': True}) as ydl:
         info = ydl.extract_info(url, download=False)
-        title = info.get('title', 'video')
-        sanitized_title = re.sub(r'[\\/*?:"<>|]', "", title)
+        sanitized_title = re.sub(r'[\\/*?:"<>|]', "", info.get('title', 'video'))
 
     file_path_template = os.path.join(download_dir, f'{sanitized_title}.%(ext)s')
-
     ydl_opts = {
         'outtmpl': file_path_template, 'noplaylist': True, 'quiet': True,
         'progress_hooks': [lambda d: None],
@@ -200,28 +229,46 @@ async def download_file(identifier: str, format_choice: str, update: Update, con
 
     effective_update = update.callback_query or update.message
     caption_text = info_dict.get('title', 'File')
-
     sender = effective_update.message.reply_audio if format_choice == 'audio' else effective_update.message.reply_video
     with open(downloaded_path, 'rb') as file:
         await sender(file, caption=caption_text, title=caption_text)
-
     os.remove(downloaded_path)
 
 def main() -> None:
-    """Start the bot."""
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
         logger.error("TELEGRAM_TOKEN environment variable not set.")
-        print("Please set TELEGRAM_TOKEN environment variable.")
         return
 
     application = Application.builder().token(token).build()
+
+    # Conversation handlers
+    search_conv = ConversationHandler(
+        entry_points=[CommandHandler("search", search_start)],
+        states={
+            SEARCH_ARTIST: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_get_artist)],
+            SEARCH_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_get_title_and_execute)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    song_conv = ConversationHandler(
+        entry_points=[CommandHandler("song", song_start)],
+        states={
+            SONG_ARTIST: [MessageHandler(filters.TEXT & ~filters.COMMAND, song_get_artist)],
+            SONG_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, song_get_title_and_execute)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    application.add_handler(search_conv)
+    application.add_handler(song_conv)
+
+    # Other handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("search", search))
-    application.add_handler(CommandHandler("song", song))
     application.add_handler(CallbackQueryHandler(download_button, pattern="^dl:"))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
+    # A low-priority handler for URLs or invalid commands
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url), group=1)
 
     application.run_polling()
 
