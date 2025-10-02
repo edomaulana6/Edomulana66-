@@ -204,6 +204,7 @@ async def download_button(update: Update, context: CallbackContext) -> None:
         await original_message.edit_text(text="❌ Gagal mengunduh file.")
 
 async def download_file(identifier: str, format_choice: str, update: Update, context: CallbackContext):
+    """Downloads the file using yt-dlp and sends it."""
     url = identifier if re.match(r'https?://', identifier) else f"https://www.youtube.com/watch?v={identifier}"
     download_dir = 'downloads'
     os.makedirs(download_dir, exist_ok=True)
@@ -213,22 +214,24 @@ async def download_file(identifier: str, format_choice: str, update: Update, con
         sanitized_title = re.sub(r'[\\/*?:"<>|]', "", info.get('title', 'video'))
 
     file_path_template = os.path.join(download_dir, f'{sanitized_title}.%(ext)s')
+
     ydl_opts = {
-        'outtmpl': file_path_template, 'noplaylist': True, 'quiet': True,
+        'outtmpl': file_path_template,
+        'noplaylist': True,
+        'quiet': True,
         'progress_hooks': [lambda d: None],
     }
-    ydl_opts.update({
-        'format': 'bestaudio/best',
-        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}],
-    } if format_choice == 'audio' else {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-    })
+
+    if format_choice == 'audio':
+        # Download best audio directly without re-encoding to MP3. This is much faster.
+        # The format is usually M4A.
+        ydl_opts['format'] = 'bestaudio/best'
+    else: # video
+        ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info_dict = ydl.extract_info(url, download=True)
         downloaded_path = ydl.prepare_filename(info_dict)
-        if format_choice == 'audio':
-            downloaded_path = os.path.splitext(downloaded_path)[0] + '.mp3'
 
     if not os.path.exists(downloaded_path):
         raise FileNotFoundError(f"File not found after download: {downloaded_path}")
