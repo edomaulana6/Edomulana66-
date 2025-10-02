@@ -117,8 +117,11 @@ async def song_get_title_and_execute(update: Update, context: CallbackContext) -
 # General conversation commands
 async def cancel(update: Update, context: CallbackContext) -> int:
     """Cancels and ends the conversation."""
+    # Specifically remove conversation-related data, leaving URL download data intact.
+    if 'artist' in context.user_data:
+        del context.user_data['artist']
+
     await update.message.reply_text("Pencarian dibatalkan.")
-    context.user_data.clear()
     return ConversationHandler.END
 
 # --- Standard Command Handlers ---
@@ -198,7 +201,8 @@ async def download_button(update: Update, context: CallbackContext) -> None:
     original_message = await query.edit_message_text(text=f"⏳ Mempersiapkan unduhan {format_choice}...")
     try:
         await download_file(identifier, format_choice, update, context)
-        await original_message.edit_text(text=f"✅ Unduhan {format_choice} selesai!")
+        # Delete the "downloading..." message upon completion for a cleaner interface.
+        await original_message.delete()
     except Exception as e:
         logger.error(f"Error during download_file call: {e}")
         await original_message.edit_text(text="❌ Gagal mengunduh file.")
