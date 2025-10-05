@@ -28,11 +28,10 @@ pkg update && pkg upgrade
     ```
 
 3.  **Instal Library Python:**
-    Pindah ke direktori bot yang baru saja dibuat, lalu instal dependensi yang diperlukan.
+    Pindah ke direktori bot yang baru saja dibuat, lalu instal dependensi dari file `requirements.txt`.
     ```bash
     cd telegram-bot
-    pip install python-telegram-bot "python-telegram-bot[ext]" --pre
-    pip install git+https://github.com/yt-dlp/yt-dlp.git
+    pip install -r requirements.txt
     ```
 
 ## Konfigurasi
@@ -42,10 +41,16 @@ pkg update && pkg upgrade
     - Ikuti instruksinya, dan BotFather akan memberi Anda sebuah **token**. Token ini terlihat seperti `1234567890:ABCdEfgHiJKLmnOpqRsTUVwxyZ`.
 
 2.  **Atur Token Anda:**
-    Anda perlu mengatur token ini sebagai variabel lingkungan. Cara termudah adalah dengan menambahkannya ke skrip `start.sh`. Buka file `start.sh` dan edit baris berikut dengan token Anda:
-    ```bash
-    export TELEGRAM_TOKEN='GANTI_DENGAN_TOKEN_ANDA'
-    ```
+    Bot ini menggunakan file `.env` untuk menyimpan token rahasia Anda.
+    - Salin file template:
+      ```bash
+      cp .env.template .env
+      ```
+    - Buka file `.env` yang baru dibuat dengan editor teks dan masukkan token Anda.
+      ```
+      # Ganti dengan token Anda yang sebenarnya
+      TELEGRAM_TOKEN="1234567890:ABCdEfgHiJKLmnOpqRsTUVwxyZ"
+      ```
 
 3.  **(Opsional) Atur Perintah Bot:**
     Untuk membuat bot lebih mudah digunakan, atur daftar perintah di `@BotFather`.

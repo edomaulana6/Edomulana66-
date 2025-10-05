@@ -1,0 +1,6 @@
+# File ini berisi semua dependensi Python yang diperlukan untuk menjalankan bot.
+# Gunakan perintah 'pip install -r requirements.txt' untuk menginstal semuanya.
+
+python-telegram-bot[ext]==21.0.1
+yt-dlp==2023.12.30
+requests==2.31.0
