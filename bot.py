@@ -76,23 +76,75 @@ async def perform_search(query: str, update: Update, context: CallbackContext):
         await update.message.reply_text("Maaf, terjadi kesalahan fatal saat melakukan pencarian.")
 
 async def perform_song_download(query: str, update: Update, context: CallbackContext):
-    """Finds the top song on YouTube and sends it as audio."""
-    message = await update.message.reply_text(f"🔎 Mencari lagu teratas untuk: *{query}*...", parse_mode='Markdown')
-    try:
-        with yt_dlp.YoutubeDL({'default_search': 'ytsearch1', 'quiet': True}) as ydl:
-            info = ydl.extract_info(query, download=False)['entries'][0]
+    """Finds the top song, downloads it as MP3, and sends it."""
+    message = await update.message.reply_text(f"🔎 Mencari & mengunduh: *{query}*...", parse_mode='Markdown')
 
-        caption = f"🎵 *{info.get('title', 'Tanpa Judul')}*\n\n⬇️ Mengunduh audio..."
-        if thumbnail := info.get('thumbnail'):
-            await update.message.reply_photo(photo=thumbnail, caption=caption, parse_mode='Markdown')
-        else:
-            await update.message.reply_text(caption, parse_mode='Markdown')
+    download_dir = 'downloads'
+    os.makedirs(download_dir, exist_ok=True)
+
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': os.path.join(download_dir, '%(title)s.%(ext)s'),
+        'noplaylist': True,
+        'quiet': True,
+        'default_search': 'ytsearch1',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }]
+    }
+
+    final_path = ""
+    base_path = ""
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            result = ydl.extract_info(f"ytsearch1:{query}", download=True)
+            if not result.get('entries'):
+                await message.edit_text("Tidak ada lagu yang ditemukan untuk query tersebut.")
+                return
+            info_dict = result['entries'][0]
+            base_path = ydl.prepare_filename(info_dict)
+
+        final_path = os.path.splitext(base_path)[0] + '.mp3'
+        if not os.path.exists(final_path):
+            raise FileNotFoundError(f"File MP3 tidak ditemukan setelah konversi: {final_path}")
+
+        await message.edit_text(f"✅ Unduhan selesai. Mengirim *{info_dict.get('title', 'file')}*...", parse_mode='Markdown')
+
+        sanitized_title = re.sub(r'[\\/*?:"<>|]', "", info_dict.get('title', 'video'))
+        telegram_filename = f"{sanitized_title}.mp3"
+
+        # Baca thumbnail ke dalam memori jika ada
+        thumbnail_data = None
+        if thumbnail_url := info_dict.get('thumbnail'):
+            import requests
+            try:
+                response = requests.get(thumbnail_url)
+                response.raise_for_status()
+                thumbnail_data = response.content
+            except requests.RequestException as e:
+                logger.warning(f"Gagal mengunduh thumbnail: {e}")
+
+        with open(final_path, 'rb') as file_to_send:
+            await update.message.reply_audio(
+                file_to_send,
+                caption=info_dict.get('title'),
+                title=info_dict.get('title'),
+                filename=telegram_filename,
+                thumbnail=thumbnail_data
+            )
 
         await message.delete()
-        await download_file(info.get('id'), 'audio', update, context)
+
     except Exception as e:
-        logger.error(f"Error during song download: {e}")
-        await message.edit_text("Maaf, terjadi kesalahan saat mencari atau mengunduh lagu.")
+        logger.error(f"Error during song download for query '{query}': {e}")
+        await message.edit_text("Maaf, terjadi kesalahan fatal saat mengunduh lagu.")
+    finally:
+        if os.path.exists(final_path):
+            os.remove(final_path)
+        if base_path and base_path != final_path and os.path.exists(base_path):
+            os.remove(base_path)
 
 # --- Conversation Handlers ---
 
@@ -201,41 +253,84 @@ async def download_button(update: Update, context: CallbackContext) -> None:
         await original_message.edit_text(text="❌ Gagal mengunduh file.")
 
 async def download_file(identifier: str, format_choice: str, update: Update, context: CallbackContext):
-    """Downloads the file using yt-dlp and sends it."""
+    """Mengunduh file berdasarkan URL atau ID, mengirimkannya, dan membersihkan."""
     url = identifier if re.match(r'https?://', identifier) else f"https://www.youtube.com/watch?v={identifier}"
     download_dir = 'downloads'
     os.makedirs(download_dir, exist_ok=True)
 
-    with yt_dlp.YoutubeDL({'quiet': True, 'extract_flat': True}) as ydl:
-        info = ydl.extract_info(url, download=False)
-        sanitized_title = re.sub(r'[\\/*?:"<>|]', "", info.get('title', 'video'))
-
-    file_path_template = os.path.join(download_dir, f'{sanitized_title}.%(ext)s')
+    # Gunakan template nama file yang aman untuk sistem file.
+    file_path_template = os.path.join(download_dir, '%(id)s.%(ext)s')
 
     ydl_opts = {
-        'outtmpl': file_path_template, 'noplaylist': True, 'quiet': True,
-        'progress_hooks': [lambda d: None],
+        'outtmpl': file_path_template,
+        'noplaylist': True,
+        'quiet': True,
     }
+
     if format_choice == 'audio':
-        # Download best audio-only format (usually m4a or webm)
         ydl_opts['format'] = 'bestaudio/best'
+        ydl_opts['postprocessors'] = [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }]
     else:
-        # Download the best available single file containing both video and audio
         ydl_opts['format'] = 'best'
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info_dict = ydl.extract_info(url, download=True)
-        downloaded_path = ydl.prepare_filename(info_dict)
+    final_path = ""
+    base_path = ""
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # Unduh dan dapatkan info dalam satu langkah
+            info_dict = ydl.extract_info(url, download=True)
+            base_path = ydl.prepare_filename(info_dict)
 
-    if not os.path.exists(downloaded_path):
-        raise FileNotFoundError(f"File not found after download: {downloaded_path}")
+        # Tentukan path akhir setelah potensi konversi
+        final_path = os.path.splitext(base_path)[0] + '.mp3' if format_choice == 'audio' else base_path
 
-    effective_update = update.callback_query or update.message
-    caption_text = info_dict.get('title', 'File')
-    sender = effective_update.message.reply_audio if format_choice == 'audio' else effective_update.message.reply_video
-    with open(downloaded_path, 'rb') as file:
-        await sender(file, caption=caption_text, title=caption_text)
-    os.remove(downloaded_path)
+        if not os.path.exists(final_path):
+            if os.path.exists(base_path):
+                final_path = base_path  # Fallback jika konversi gagal
+            else:
+                raise FileNotFoundError(f"File tidak ditemukan setelah diunduh: {final_path} atau {base_path}")
+
+        effective_update = update.callback_query or update.message
+        caption_text = info_dict.get('title', 'File')
+
+        # Bersihkan judul untuk nama file yang dikirim ke Telegram
+        sanitized_title = re.sub(r'[\\/*?:"<>|]', "", caption_text)
+
+        # Siapkan thumbnail untuk audio
+        thumbnail_data = None
+        if format_choice == 'audio' and (thumbnail_url := info_dict.get('thumbnail')):
+            import requests
+            try:
+                response = requests.get(thumbnail_url)
+                response.raise_for_status()
+                thumbnail_data = response.content
+            except requests.RequestException as e:
+                logger.warning(f"Gagal mengunduh thumbnail: {e}")
+
+        sender = effective_update.message.reply_audio if format_choice == 'audio' else effective_update.message.reply_video
+
+        with open(final_path, 'rb') as file_to_send:
+            # Gunakan judul yang bersih untuk nama file di Telegram
+            file_extension = 'mp3' if format_choice == 'audio' else info_dict.get('ext', 'mp4')
+            filename = f"{sanitized_title}.{file_extension}"
+            await sender(
+                file_to_send,
+                caption=caption_text,
+                title=caption_text,
+                filename=filename,
+                thumbnail=thumbnail_data
+            )
+
+    finally:
+        # Pembersihan: Pastikan semua file yang diunduh dihapus
+        if os.path.exists(final_path):
+            os.remove(final_path)
+        if base_path and base_path != final_path and os.path.exists(base_path):
+            os.remove(base_path)
 
 def main() -> None:
     token = os.getenv("TELEGRAM_TOKEN")
