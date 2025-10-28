@@ -1,8 +1,18 @@
 #!/bin/bash
 
+# --- Deteksi Lingkungan ---
+IS_TERMUX=false
+if [[ -d "/data/data/com.termux" ]]; then
+    IS_TERMUX=true
+fi
+
 # Pastikan skrip dijalankan sebagai root
 if [ "$(id -u)" -ne 0 ]; then
-  echo "Skrip ini harus dijalankan sebagai root. Coba jalankan dengan 'sudo'." >&2
+  if [ "$IS_TERMUX" = true ]; then
+      echo "Skrip ini harus dijalankan sebagai root. Coba jalankan dengan 'tsu' terlebih dahulu." >&2
+  else
+      echo "Skrip ini harus dijalankan sebagai root. Coba jalankan dengan 'sudo'." >&2
+  fi
   exit 1
 fi
 

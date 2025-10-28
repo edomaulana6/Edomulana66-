@@ -1,45 +1,61 @@
 #!/bin/bash
 
+# --- Deteksi Lingkungan ---
+IS_TERMUX=false
+if [[ -d "/data/data/com.termux" ]]; then
+    IS_TERMUX=true
+fi
+
 # Pastikan skrip dijalankan sebagai root
 if [ "$(id -u)" -ne 0 ]; then
-  echo "Skrip ini harus dijalankan sebagai root. Coba jalankan dengan 'sudo'." >&2
+  if [ "$IS_TERMUX" = true ]; then
+      echo "Skrip ini harus dijalankan sebagai root. Coba jalankan dengan 'tsu' terlebih dahulu." >&2
+  else
+      echo "Skrip ini harus dijalankan sebagai root. Coba jalankan dengan 'sudo'." >&2
+  fi
   exit 1
 fi
 
 # --- Variabel (dapat disesuaikan) ---
-# Ganti dengan nama network interface utama Anda jika berbeda (misal: eth0, ens3)
-# Gunakan `ip a` atau `ifconfig` untuk memeriksa
-SERVER_INTERFACE="eth0"
-# Ganti dengan port yang Anda inginkan
+# Mencoba mendeteksi interface jaringan utama secara otomatis
+SERVER_INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n 1)
+if [ -z "$SERVER_INTERFACE" ]; then
+    echo "PERINGATAN: Tidak dapat mendeteksi interface jaringan utama."
+    read -p "Masukkan nama interface jaringan utama Anda (misal: wlan0, eth0): " SERVER_INTERFACE
+    if [ -z "$SERVER_INTERFACE" ]; then
+        echo "KESALAHAN: Nama interface tidak boleh kosong."
+        exit 1
+    fi
+fi
+echo "INFO: Menggunakan interface jaringan: ${SERVER_INTERFACE}"
+
 SERVER_PORT=51820
-# Alamat IP internal untuk server VPN
 SERVER_PRIVATE_IP="10.0.0.1/24"
-# Alamat IP internal untuk klien pertama
 CLIENT_PRIVATE_IP="10.0.0.2/32"
 
 # --- Instalasi ---
 echo "INFO: Memperbarui daftar paket..."
-apt-get update
-
-echo "INFO: Menginstal WireGuard dan paket pendukung..."
-apt-get install -y wireguard resolvconf
+if [ "$IS_TERMUX" = true ]; then
+    pkg update
+    echo "INFO: Menginstal paket untuk Termux (wireguard-tools, termux-exec, curl)..."
+    pkg install -y wireguard-tools termux-exec curl
+else
+    apt-get update
+    echo "INFO: Menginstal paket untuk Linux (wireguard, curl)..."
+    apt-get install -y wireguard curl
+fi
 
 # --- Pembuatan Kunci ---
 echo "INFO: Membuat kunci server dan klien..."
-# Buat direktori konfigurasi
 mkdir -p /etc/wireguard
-# Atur izin yang aman
 chmod 700 /etc/wireguard
 
-# Hapus kunci lama jika ada untuk menghindari konflik
 rm -f /etc/wireguard/server_private.key /etc/wireguard/server_public.key
 rm -f /etc/wireguard/client_private.key /etc/wireguard/client_public.key
 
-# Buat kunci baru
 wg genkey | tee /etc/wireguard/server_private.key | wg pubkey > /etc/wireguard/server_public.key
 wg genkey | tee /etc/wireguard/client_private.key | wg pubkey > /etc/wireguard/client_public.key
 
-# Simpan nilai kunci ke dalam variabel
 SERVER_PRIVATE_KEY=$(cat /etc/wireguard/server_private.key)
 SERVER_PUBLIC_KEY=$(cat /etc/wireguard/server_public.key)
 CLIENT_PRIVATE_KEY=$(cat /etc/wireguard/client_private.key)
@@ -62,7 +78,6 @@ AllowedIPs = ${CLIENT_PRIVATE_IP}
 EOL
 
 # --- Konfigurasi Klien ---
-# Dapatkan alamat IP publik server
 SERVER_PUBLIC_IP=$(curl -s https://api.ipify.org)
 if [ -z "${SERVER_PUBLIC_IP}" ]; then
     echo "PERINGATAN: Tidak dapat mendeteksi IP publik secara otomatis."
@@ -75,7 +90,7 @@ cat > ./client.conf << EOL
 [Interface]
 PrivateKey = ${CLIENT_PRIVATE_KEY}
 Address = ${CLIENT_PRIVATE_IP}
-DNS = 1.1.1.1 # DNS resolver dari Cloudflare
+DNS = 1.1.1.1
 
 [Peer]
 PublicKey = ${SERVER_PUBLIC_KEY}
@@ -86,13 +101,23 @@ EOL
 
 # --- Aktifkan IP Forwarding ---
 echo "INFO: Mengaktifkan IP forwarding..."
-sed -i '/net.ipv4.ip_forward=1/s/^#//' /etc/sysctl.conf
-sysctl -p
+if [ "$IS_TERMUX" = false ]; then
+    sed -i '/net.ipv4.ip_forward=1/s/^#//' /etc/sysctl.conf
+    sysctl -p
+else
+    # Di Termux, ini biasanya sudah aktif atau tidak dikontrol melalui sysctl.conf
+    echo "INFO: Melewati konfigurasi sysctl untuk Termux."
+fi
 
 # --- Mulai Layanan WireGuard ---
-echo "INFO: Memulai dan mengaktifkan layanan WireGuard (wg-quick@wg0)..."
-systemctl enable wg-quick@wg0
-systemctl start wg-quick@wg0
+echo "INFO: Memulai layanan WireGuard (wg-quick up wg0)..."
+wg-quick up wg0
+
+# Aktifkan saat boot untuk sistem Linux standar
+if [ "$IS_TERMUX" = false ]; then
+    echo "INFO: Mengaktifkan layanan agar berjalan saat boot..."
+    systemctl enable wg-quick@wg0
+fi
 
 # --- Selesai ---
 echo ""
@@ -104,10 +129,13 @@ echo "-> Konfigurasi server telah disimpan di /etc/wireguard/wg0.conf"
 echo "-> Konfigurasi klien telah disimpan di ./client.conf"
 echo ""
 echo "Langkah Selanjutnya:"
-echo "1. Salin file 'client.conf' ke perangkat Anda (HP/PC)."
-echo "2. Instal aplikasi WireGuard di perangkat Anda."
-echo "3. Impor file 'client.conf' ke dalam aplikasi."
-echo "4. Hubungkan VPN!"
+echo "1. Salin file 'client.conf' ke perangkat Anda."
+echo "2. Instal aplikasi WireGuard dan impor file tersebut."
+echo "3. Hubungkan VPN!"
 echo ""
-echo "Untuk memeriksa status VPN di server, gunakan perintah: wg show"
+echo "Untuk memeriksa status VPN, gunakan perintah: wg show"
+if [ "$IS_TERMUX" = true ]; then
+    echo "PERINGATAN PENTING UNTUK TERMUX:"
+    echo "Koneksi VPN akan berhenti jika Termux ditutup. Anda harus menjalankan 'wg-quick up wg0' setiap kali memulai ulang Termux."
+fi
 echo "=========================================================="

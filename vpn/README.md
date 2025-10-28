@@ -1,92 +1,94 @@
 # Skrip Instalasi & Manajemen VPN WireGuard
 
-Proyek ini menyediakan dua skrip Bash untuk mempermudah proses pembuatan dan pengelolaan server VPN WireGuard pribadi Anda di server berbasis Debian atau Ubuntu.
+Proyek ini menyediakan dua skrip Bash untuk mempermudah proses pembuatan dan pengelolaan server VPN WireGuard pribadi Anda. Skrip ini dirancang agar kompatibel dengan **server berbasis Debian/Ubuntu** dan **Termux di Android**.
 
--   `install_vpn.sh`: Menginstal WireGuard, membuat semua konfigurasi awal, dan menghasilkan file konfigurasi untuk klien pertama.
+-   `install_vpn.sh`: Menginstal semua dependensi, membuat konfigurasi awal, dan menghasilkan file konfigurasi untuk klien pertama.
 -   `add_user.sh`: Menambahkan pengguna (klien) baru ke server VPN yang sudah ada.
 
 ## Persyaratan
-
--   Sebuah server yang menjalankan sistem operasi Debian atau Ubuntu.
--   Akses root atau pengguna dengan hak `sudo` di server tersebut.
+-   **Untuk Server Linux:** Sebuah server yang menjalankan Debian atau Ubuntu dengan akses `sudo`.
+-   **Untuk Termux:** Aplikasi Termux di Android dengan paket `tsu` terinstal untuk akses root (`pkg install tsu`).
 
 ---
 
-## Panduan Penggunaan
-
-### Langkah 1: Instalasi Awal Server VPN
+## Panduan Instalasi Awal
 
 Proses ini hanya perlu dilakukan sekali saat pertama kali menyiapkan server.
 
-1.  **Salin Skrip ke Server Anda**
-    Salin file `install_vpn.sh` dan `add_user.sh` ke direktori home di server Anda. Anda bisa melakukannya dengan `scp` atau dengan menyalin dan menempelkan isinya menggunakan editor teks seperti `nano`.
+### Langkah 1: Persiapan
+
+1.  **Salin Skrip**
+    Salin file `install_vpn.sh` dan `add_user.sh` ke direktori home di server atau Termux Anda.
 
 2.  **Berikan Izin Eksekusi**
-    Buka terminal di server Anda dan berikan izin agar skrip dapat dijalankan:
+    Buka terminal dan berikan izin agar skrip dapat dijalankan:
     ```bash
     chmod +x install_vpn.sh add_user.sh
     ```
 
-3.  **Jalankan Skrip Instalasi**
-    Jalankan skrip instalasi dengan hak `sudo`. Skrip ini akan menginstal semua yang dibutuhkan, membuat kunci, dan mengkonfigurasi server.
+### Langkah 2: Jalankan Skrip Instalasi
+
+Pilih instruksi yang sesuai dengan platform Anda.
+
+#### 🐧 Untuk Server Linux (Debian/Ubuntu)
+Jalankan skrip instalasi dengan `sudo`:
+```bash
+sudo ./install_vpn.sh
+```
+
+#### 📱 Untuk Termux
+1.  **Dapatkan Akses Root**
+    Jalankan `tsu` untuk beralih ke mode superuser.
     ```bash
-    sudo ./install_vpn.sh
+    tsu
     ```
-    Ikuti instruksi yang mungkin muncul. Setelah selesai, skrip akan membuat file bernama `client.conf` di direktori yang sama.
+    Anda akan melihat prompt berubah dari `$` menjadi `#`.
 
-4.  **Ambil File Konfigurasi Klien**
-    File `client.conf` adalah "tiket" Anda untuk terhubung ke VPN. Salin file ini dari server ke perangkat Anda (HP atau laptop). Anda bisa menggunakan `scp` atau menampilkan isinya dengan `cat client.conf` lalu menyalin teksnya secara manual.
+2.  **Jalankan Skrip Instalasi**
+    Setelah berada di shell root (`#`), jalankan skripnya:
+    ```bash
+    ./install_vpn.sh
+    ```
 
-### Langkah 2: Menghubungkan Klien (Perangkat Anda)
+Setelah skrip selesai, sebuah file bernama `client.conf` akan dibuat di direktori yang sama.
 
-1.  **Instal Aplikasi WireGuard**
-    Unduh dan instal aplikasi resmi WireGuard di perangkat Anda.
+### Langkah 3: Hubungkan Klien (Perangkat Anda)
+
+1.  **Ambil File Konfigurasi Klien**
+    Salin file `client.conf` dari server/Termux ke perangkat Anda (HP atau laptop).
+    -   Di Termux, Anda bisa mengakses penyimpanan internal dari `/sdcard`. Contoh: `cp client.conf /sdcard/Download/`
+    -   Di server, gunakan `scp` atau tampilkan isinya dengan `cat client.conf` lalu salin teksnya.
+
+2.  **Instal Aplikasi WireGuard**
+    Unduh aplikasi resmi WireGuard di perangkat yang ingin Anda hubungkan ke VPN.
     -   [Android](https://play.google.com/store/apps/details?id=com.wireguard.android)
-    -   [iOS (iPhone/iPad)](https://apps.apple.com/us/app/wireguard/id1441195209)
+    -   [iOS](https://apps.apple.com/us/app/wireguard/id1441195209)
     -   [Windows](https://download.wireguard.com/windows-client/wireguard-installer.exe)
     -   [macOS](https://apps.apple.com/us/app/wireguard/id1451685025)
 
-2.  **Impor Konfigurasi**
-    Buka aplikasi WireGuard dan impor file `client.conf` yang sudah Anda salin. Biasanya ada tombol `+` atau "Import tunnel(s) from file". Anda juga bisa menggunakan fitur pindai kode QR jika aplikasi menawarkannya (skrip ini tidak membuat kode QR).
-
-3.  **Aktifkan Koneksi**
-    Setelah profil diimpor, cukup tekan tombol *connect* atau *activate* untuk terhubung ke server VPN Anda.
+3.  **Impor Konfigurasi & Hubungkan**
+    Buka aplikasi WireGuard, impor file `client.conf`, dan aktifkan koneksi.
 
 ---
 
-### Langkah 3: Menambah Pengguna atau Perangkat Baru
+## Menambah Pengguna Baru
 
-Jika Anda ingin menghubungkan perangkat lain (misalnya, laptop setelah HP Anda terhubung), jalankan skrip `add_user.sh`.
+Jika Anda ingin menghubungkan perangkat lain, gunakan skrip `add_user.sh`.
 
-1.  **Jalankan Skrip `add_user.sh`**
-    Di server Anda, jalankan perintah:
-    ```bash
-    sudo ./add_user.sh
-    ```
+1.  **Jalankan Skrip**
+    -   **Di Linux:** `sudo ./add_user.sh`
+    -   **Di Termux:** `tsu` (jika belum root), lalu `./add_user.sh`
 
 2.  **Masukkan Nama Klien**
-    Skrip akan meminta Anda memasukkan nama untuk klien baru. Gunakan nama yang deskriptif tanpa spasi, contoh: `laptop_kerja` atau `hp_samsung`.
+    Skrip akan meminta Anda memasukkan nama untuk klien baru (contoh: `laptop_kerja`).
 
 3.  **Ambil File Konfigurasi Baru**
-    Skrip akan membuat file baru, contohnya `laptop_kerja.conf`. Sama seperti sebelumnya, salin file ini ke perangkat baru Anda dan impor ke aplikasi WireGuard di sana.
-
-    Ulangi langkah ini setiap kali Anda ingin menambahkan perangkat baru.
+    Skrip akan membuat file baru (contoh: `laptop_kerja.conf`). Salin file ini ke perangkat baru Anda dan impor ke aplikasi WireGuard di sana.
 
 ---
 
-## Perintah Server yang Berguna
+## Catatan Penting untuk Termux
 
--   **Melihat Status WireGuard dan Klien yang Terhubung:**
-    ```bash
-    sudo wg show
-    ```
-
--   **Memulai Ulang Layanan WireGuard:**
-    ```bash
-    sudo systemctl restart wg-quick@wg0
-    ```
-
--   **Melihat Log Layanan:**
-    ```bash
-    sudo journalctl -u wg-quick@wg0
-    ```
+-   **Tidak Berjalan Saat Boot:** Koneksi VPN tidak akan dimulai secara otomatis saat perangkat dinyalakan ulang. Anda harus membuka Termux, beralih ke root (`tsu`), dan menjalankan `wg-quick up wg0` untuk mengaktifkan kembali server VPN.
+-   **Jaga Termux Tetap Aktif:** Gunakan `termux-wake-lock` untuk mencegah Android menghentikan aplikasi Termux saat berjalan di latar belakang.
+-   **Network Interface:** Skrip mencoba mendeteksi interface jaringan secara otomatis (biasanya `wlan0`), tetapi jika gagal, Anda mungkin perlu memasukkannya secara manual.
