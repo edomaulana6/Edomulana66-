@@ -2,16 +2,25 @@
 
 # --- Deteksi Lingkungan ---
 IS_TERMUX=false
-if [[ -d "/data/data/com.termux" ]]; then
+# Metode deteksi yang lebih andal untuk Termux
+if [[ "$PREFIX" == *com.termux* ]]; then
     IS_TERMUX=true
 fi
 
-# Pastikan skrip dijalankan sebagai root
+# --- Pemeriksaan Root yang Ditingkatkan ---
 if [ "$(id -u)" -ne 0 ]; then
   if [ "$IS_TERMUX" = true ]; then
-      echo "Skrip ini harus dijalankan sebagai root. Coba jalankan dengan 'tsu' terlebih dahulu." >&2
+      # Periksa apakah tsu sudah terinstal
+      if ! command -v tsu &> /dev/null; then
+          echo "KESALAHAN: Perintah 'tsu' tidak ditemukan."
+          echo "Harap instal dengan menjalankan: pkg install tsu"
+          echo "Setelah itu, jalankan skrip ini lagi dengan 'tsu' terlebih dahulu."
+      else
+          echo "KESALAHAN: Skrip ini harus dijalankan sebagai root."
+          echo "Silakan jalankan 'tsu' untuk menjadi root, lalu jalankan skrip ini lagi."
+      fi
   else
-      echo "Skrip ini harus dijalankan sebagai root. Coba jalankan dengan 'sudo'." >&2
+      echo "KESALAHAN: Skrip ini harus dijalankan sebagai root. Coba jalankan dengan 'sudo'."
   fi
   exit 1
 fi

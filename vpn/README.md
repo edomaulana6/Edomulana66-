@@ -7,7 +7,7 @@ Proyek ini menyediakan dua skrip Bash untuk mempermudah proses pembuatan dan pen
 
 ## Persyaratan
 -   **Untuk Server Linux:** Sebuah server yang menjalankan Debian atau Ubuntu dengan akses `sudo`.
--   **Untuk Termux:** Aplikasi Termux di Android dengan paket `tsu` terinstal untuk akses root (`pkg install tsu`).
+-   **Untuk Termux:** Aplikasi Termux di Android. Anda **harus** memiliki akses root dan paket `tsu` untuk menjalankannya.
 
 ---
 
@@ -37,14 +37,20 @@ sudo ./install_vpn.sh
 ```
 
 #### 📱 Untuk Termux
-1.  **Dapatkan Akses Root**
+1.  **Instal `tsu` (Jika Belum Ada)**
+    `tsu` adalah paket yang memungkinkan Anda beralih ke superuser (root) di Termux. Jika Anda belum menginstalnya, jalankan:
+    ```bash
+    pkg install tsu
+    ```
+
+2.  **Dapatkan Akses Root**
     Jalankan `tsu` untuk beralih ke mode superuser.
     ```bash
     tsu
     ```
     Anda akan melihat prompt berubah dari `$` menjadi `#`.
 
-2.  **Jalankan Skrip Instalasi**
+3.  **Jalankan Skrip Instalasi**
     Setelah berada di shell root (`#`), jalankan skripnya:
     ```bash
     ./install_vpn.sh
