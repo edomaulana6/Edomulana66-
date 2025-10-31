@@ -2,5 +2,7 @@
 # Gunakan perintah 'pip install -r requirements.txt' untuk menginstal semuanya.
 
 python-telegram-bot[ext]==21.0.1
-yt-dlp==2023.12.30
 requests==2.31.0
+
+# Menginstal yt-dlp versi terbaru langsung dari GitHub
+yt-dlp @ git+https://github.com/yt-dlp/yt-dlp.git
