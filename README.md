@@ -3,7 +3,7 @@
 Bot Telegram ini memungkinkan Anda untuk mengunduh video dan audio dari YouTube dan situs lain yang didukung oleh `yt-dlp`. Bot ini dirancang khusus untuk dijalankan dengan mudah di Termux.
 
 ## Fitur
-- **Unduh dari URL**: Kirimkan link apa saja untuk mendapatkan pilihan unduhan (audio/video).
+- **Unduh dari URL Interaktif**: Gunakan `/download` untuk memulai proses unduhan dari URL.
 - **Pencarian Interaktif (Top 5)**: Gunakan `/search` untuk memulai pencarian. Bot akan menanyakan judul lagu yang Anda inginkan.
 - **Unduh Lagu Interaktif**: Gunakan `/song` untuk memulai proses unduhan. Bot akan menanyakan judul lagu yang ingin diunduh.
 - **Berjalan di Latar Belakang**: Dilengkapi dengan skrip untuk memulai dan menghentikan bot di latar belakang.
@@ -49,6 +49,19 @@ Anda tidak perlu lagi mengedit file secara manual. Cukup jalankan skrip setup in
     -   Salin (copy) dan tempel (paste) token tersebut ke dalam terminal, lalu tekan Enter.
 
     Skrip akan secara otomatis membuat file `.env` yang benar untuk Anda. Proses selesai!
+
+3.  **(Opsional) Atur Perintah Bot:**
+    Untuk membuat bot lebih mudah digunakan, atur daftar perintah di `@BotFather`.
+    - Kirim perintah `/mybots`, pilih bot Anda, lalu pilih "Edit Bot" -> "Edit Commands".
+    - Salin dan tempel teks berikut:
+    ```
+    start - ✨ Memulai bot
+    help - 🤔 Menampilkan bantuan
+    search - 🔎 Cari lagu (5 teratas)
+    song - 🎵 Unduh lagu teratas
+    download - 🔗 Unduh dari URL
+    cancel - ❌ Batalkan operasi
+    ```
 
 ## Menjalankan Bot
 Untuk kemudahan, telah disediakan skrip untuk menjalankan dan menghentikan bot.
