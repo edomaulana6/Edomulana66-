@@ -14,6 +14,7 @@ from telegram.ext import (
     PicklePersistence,
 )
 import yt_dlp
+from PIL import Image, ImageFilter, ImageEnhance
 
 # Enable logging
 logging.basicConfig(
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # States for conversations
 GET_TITLE = 0
-GET_URL = 2
+GET_ENHANCE_PHOTO = 4
 
 # --- Helper Functions ---
 
@@ -171,14 +172,55 @@ async def get_title_and_download(update: Update, context: CallbackContext) -> in
     await perform_song_download(query, update, context)
     return ConversationHandler.END
 
-async def download_start(update: Update, context: CallbackContext) -> int:
-    """Starts the download conversation by asking for a URL."""
-    await update.message.reply_text("Silakan kirimkan URL yang ingin Anda unduh. (Ketik /cancel untuk batal)")
-    return GET_URL
-
 async def cancel(update: Update, context: CallbackContext) -> int:
     """Cancels and ends the conversation."""
-    await update.message.reply_text("Pencarian dibatalkan.")
+    await update.message.reply_text("Operasi dibatalkan.")
+    return ConversationHandler.END
+
+# --- Photo Enhancement Handlers ---
+
+async def enhance_start(update: Update, context: CallbackContext) -> int:
+    """Starts the photo enhancement conversation."""
+    await update.message.reply_text(
+        "Tentu, silakan kirimkan foto yang ingin Anda jernihkan.\n"
+        "Ketik /cancel untuk membatalkan."
+    )
+    return GET_ENHANCE_PHOTO
+
+async def enhance_photo(update: Update, context: CallbackContext) -> int:
+    """Receives a photo, enhances it, and sends it back."""
+    photo_file = await update.message.photo[-1].get_file()
+
+    original_path = f"downloads/{photo_file.file_id}.jpg"
+    enhanced_path = f"downloads/{photo_file.file_id}_enhanced.jpg"
+    os.makedirs('downloads', exist_ok=True)
+
+    await update.message.reply_text("⏳ Menjernihkan foto, mohon tunggu...")
+
+    try:
+        await photo_file.download_to_drive(original_path)
+
+        img = Image.open(original_path)
+
+        img = ImageEnhance.Contrast(img).enhance(1.5)
+        img = img.filter(ImageFilter.SHARPEN)
+
+        img.save(enhanced_path, "JPEG", quality=95)
+
+        await update.message.reply_text("✅ Foto berhasil dijernihkan!")
+
+        with open(enhanced_path, 'rb') as photo_to_send:
+            await update.message.reply_photo(photo=photo_to_send, caption="Berikut adalah versi yang sudah dijernihkan.")
+
+    except Exception as e:
+        logger.error(f"Error during photo enhancement: {e}")
+        await update.message.reply_text("Maaf, terjadi kesalahan saat memproses foto.")
+    finally:
+        if os.path.exists(original_path):
+            os.remove(original_path)
+        if os.path.exists(enhanced_path):
+            os.remove(enhanced_path)
+
     return ConversationHandler.END
 
 # --- Standard Command Handlers ---
@@ -202,14 +244,11 @@ async def help_command(update: Update, context: CallbackContext) -> None:
 
 # --- Download and URL handling ---
 
-async def get_url_and_process(update: Update, context: CallbackContext) -> int:
-    """Receives a URL in a conversation and processes it."""
+async def handle_url(update: Update, context: CallbackContext) -> None:
+    """Handles messages containing a URL entity."""
     entities = update.message.entities
     url_entity = next((e for e in entities if e.type in ("url", "text_link")), None)
-
-    if not url_entity:
-        await update.message.reply_text("URL tidak ditemukan. Mohon kirim satu URL yang valid.")
-        return GET_URL
+    if not url_entity: return
 
     if url_entity.type == "text_link":
         url = url_entity.url
@@ -238,8 +277,6 @@ async def get_url_and_process(update: Update, context: CallbackContext) -> int:
     except Exception as e:
         logger.error(f"Error processing URL {url}: {e}")
         await message.edit_text("Gagal memproses URL. Pastikan link tersebut didukung.")
-
-    return ConversationHandler.END
 
 async def download_button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
@@ -367,24 +404,23 @@ def main() -> None:
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
-    application.add_handler(search_conv)
-    application.add_handler(song_conv)
-
-    # Conversation handler for the new /download command
-    download_conv = ConversationHandler(
-        entry_points=[CommandHandler("download", download_start)],
+    enhance_conv = ConversationHandler(
+        entry_points=[CommandHandler("enhance_photo", enhance_start)],
         states={
-            GET_URL: [MessageHandler(filters.Entity("url") | filters.Entity("text_link"), get_url_and_process)]
+            GET_ENHANCE_PHOTO: [MessageHandler(filters.PHOTO, enhance_photo)]
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
-    application.add_handler(download_conv)
+
+    application.add_handler(search_conv)
+    application.add_handler(song_conv)
+    application.add_handler(enhance_conv)
 
     # Other handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CallbackQueryHandler(download_button, pattern="^dl:"))
-    # The automatic URL handler is now removed.
+    application.add_handler(MessageHandler(filters.Entity("url") | filters.Entity("text_link"), handle_url))
 
     application.run_polling()
 

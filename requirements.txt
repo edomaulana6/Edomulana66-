@@ -6,3 +6,4 @@ requests==2.31.0
 
 # Menginstal yt-dlp versi terbaru langsung dari GitHub
 yt-dlp @ git+https://github.com/yt-dlp/yt-dlp.git
+Pillow
