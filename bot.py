@@ -35,24 +35,20 @@ async def perform_search(query: str, update: Update, context: CallbackContext):
         'format': 'bestaudio/best',
         'noplaylist': True,
         'quiet': True,
-        'default_search': 'ytsearch20',  # Cari 20 video potensial
-        'match_filter': yt_dlp.utils.match_filter_func('duration < 600'),  # Filter internal di yt-dlp
+        'default_search': 'ytsearch5',
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             result = ydl.extract_info(query, download=False)
+            videos = [v for v in result.get('entries', []) if v.get('duration', 0) < 600]
 
-            # yt-dlp sudah menyaring videonya. Kita tinggal ambil 5 teratas.
-            valid_videos = result.get('entries', [])
-            top_5_videos = valid_videos[:5]
-
-            if not top_5_videos:
-                await update.message.reply_text("Tidak ada lagu (durasi di bawah 10 menit) yang ditemukan dari 20 hasil teratas.")
+            if not videos:
+                await update.message.reply_text("Tidak ada lagu (durasi di bawah 10 menit) yang ditemukan.")
                 return
 
-            await update.message.reply_text(f"Menampilkan {len(top_5_videos)} hasil teratas yang valid:")
+            await update.message.reply_text("Menampilkan hasil yang valid:")
             sent_count = 0
-            for video in top_5_videos:
+            for video in videos:
                 try:
                     video_id = video.get('id')
                     title = video.get('title', 'Tanpa Judul')
