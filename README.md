@@ -34,35 +34,21 @@ pkg update && pkg upgrade
     pip install -r requirements.txt
     ```
 
-## Konfigurasi
-1.  **Dapatkan Token Bot:**
-    - Buka Telegram dan cari `@BotFather`.
-    - Buat bot baru dengan mengirimkan perintah `/newbot`.
-    - Ikuti instruksinya, dan BotFather akan memberi Anda sebuah **token**. Token ini terlihat seperti `1234567890:ABCdEfgHiJKLmnOpqRsTUVwxyZ`.
+## Konfigurasi (Cara Baru yang Lebih Mudah)
+Anda tidak perlu lagi mengedit file secara manual. Cukup jalankan skrip setup interaktif.
 
-2.  **Atur Token Anda:**
-    Bot ini menggunakan file `.env` untuk menyimpan token rahasia Anda.
-    - Salin file template:
-      ```bash
-      cp .env.template .env
-      ```
-    - Buka file `.env` yang baru dibuat dengan editor teks dan masukkan token Anda.
-      ```
-      # Ganti dengan token Anda yang sebenarnya
-      TELEGRAM_TOKEN="1234567890:ABCdEfgHiJKLmnOpqRsTUVwxyZ"
-      ```
+1.  **Jalankan Skrip Setup:**
+    Di direktori bot, jalankan perintah berikut:
+    ```bash
+    python setup.py
+    ```
 
-3.  **(Opsional) Atur Perintah Bot:**
-    Untuk membuat bot lebih mudah digunakan, atur daftar perintah di `@BotFather`.
-    - Kirim perintah `/mybots`, pilih bot Anda, lalu pilih "Edit Bot" -> "Edit Commands".
-    - Salin dan tempel teks berikut:
-    ```
-    start - ✨ Memulai bot
-    help - 🤔 Menampilkan bantuan
-    search - 🔎 Memulai pencarian interaktif (5 teratas)
-    song - 🎵 Memulai unduhan lagu interaktif
-    cancel - ❌ Membatalkan operasi saat ini
-    ```
+2.  **Masukkan Token Anda:**
+    -   Skrip akan meminta Anda untuk memasukkan token bot.
+    -   Dapatkan token Anda dari `@BotFather` di Telegram.
+    -   Salin (copy) dan tempel (paste) token tersebut ke dalam terminal, lalu tekan Enter.
+
+    Skrip akan secara otomatis membuat file `.env` yang benar untuk Anda. Proses selesai!
 
 ## Menjalankan Bot
 Untuk kemudahan, telah disediakan skrip untuk menjalankan dan menghentikan bot.
