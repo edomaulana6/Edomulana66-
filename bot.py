@@ -233,6 +233,7 @@ async def handle_url(update: Update, context: CallbackContext) -> None:
 async def download_button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     await query.answer()
+    sticker_message = None
     try:
         _, format_choice, source_type, value = query.data.split(':', 3)
     except ValueError:
@@ -241,16 +242,27 @@ async def download_button(update: Update, context: CallbackContext) -> None:
 
     identifier = context.user_data.get(value) if source_type == 'urlkey' else value
     if not identifier:
-        await query.edit_message_text("❌ Link unduhan sudah kedaluwarsa. Silakan kirim ulang URL atau lakukan pencarian lagi.")
+        # Since the original message might not be editable anymore, send a new one.
+        await query.message.reply_text("❌ Link unduhan sudah kedaluwarsa. Silakan kirim ulang URL atau lakukan pencarian lagi.")
+        # Also remove the buttons from the old message
+        await query.edit_message_reply_markup(reply_markup=None)
         return
 
-    original_message = await query.edit_message_text(text=f"⏳ Mempersiapkan unduhan {format_choice}...")
+    # Remove buttons from the original message to prevent re-clicks
+    await query.edit_message_reply_markup(reply_markup=None)
+    # Send a sticker as a loading indicator
+    sticker_message = await query.message.reply_sticker("CAACAgIAAxkBAAIEv2X0x4-v2-5v3e_wY_v2-5v3e_wYAAJ-BwAC-5-xS_v2-5v3e_wYHgQ")
+
     try:
+        # This function will now send the file as a new message
         await download_file(identifier, format_choice, update, context)
-        await original_message.delete()
     except Exception as e:
-        logger.error(f"Error during download_file call: {e}")
-        await original_message.edit_text(text="❌ Gagal mengunduh file.")
+        logger.error(f"Error during download_file call from button: {e}")
+        await query.message.reply_text("❌ Gagal mengunduh file.")
+    finally:
+        # Clean up the sticker
+        if sticker_message:
+            await sticker_message.delete()
 
 async def download_file(identifier: str, format_choice: str, update: Update, context: CallbackContext):
     """Mengunduh file berdasarkan URL atau ID, mengirimkannya, dan membersihkan."""
