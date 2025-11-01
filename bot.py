@@ -21,9 +21,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# States for conversations
+# States for the simplified one-step conversation
 GET_TITLE = 0
-GET_URL = 2
 
 # --- Helper Functions ---
 
@@ -171,11 +170,6 @@ async def get_title_and_download(update: Update, context: CallbackContext) -> in
     await perform_song_download(query, update, context)
     return ConversationHandler.END
 
-async def download_start(update: Update, context: CallbackContext) -> int:
-    """Starts the download conversation by asking for a URL."""
-    await update.message.reply_text("Silakan kirimkan URL yang ingin Anda unduh. (Ketik /cancel untuk batal)")
-    return GET_URL
-
 async def cancel(update: Update, context: CallbackContext) -> int:
     """Cancels and ends the conversation."""
     await update.message.reply_text("Pencarian dibatalkan.")
@@ -202,14 +196,11 @@ async def help_command(update: Update, context: CallbackContext) -> None:
 
 # --- Download and URL handling ---
 
-async def get_url_and_process(update: Update, context: CallbackContext) -> int:
-    """Receives a URL in a conversation and processes it."""
+async def handle_url(update: Update, context: CallbackContext) -> None:
+    """Handles messages containing a URL entity."""
     entities = update.message.entities
     url_entity = next((e for e in entities if e.type in ("url", "text_link")), None)
-
-    if not url_entity:
-        await update.message.reply_text("URL tidak ditemukan. Mohon kirim satu URL yang valid.")
-        return GET_URL
+    if not url_entity: return
 
     if url_entity.type == "text_link":
         url = url_entity.url
@@ -238,8 +229,6 @@ async def get_url_and_process(update: Update, context: CallbackContext) -> int:
     except Exception as e:
         logger.error(f"Error processing URL {url}: {e}")
         await message.edit_text("Gagal memproses URL. Pastikan link tersebut didukung.")
-
-    return ConversationHandler.END
 
 async def download_button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
@@ -370,21 +359,11 @@ def main() -> None:
     application.add_handler(search_conv)
     application.add_handler(song_conv)
 
-    # Conversation handler for the new /download command
-    download_conv = ConversationHandler(
-        entry_points=[CommandHandler("download", download_start)],
-        states={
-            GET_URL: [MessageHandler(filters.Entity("url") | filters.Entity("text_link"), get_url_and_process)]
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
-    application.add_handler(download_conv)
-
     # Other handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CallbackQueryHandler(download_button, pattern="^dl:"))
-    # The automatic URL handler is now removed.
+    application.add_handler(MessageHandler(filters.Entity("url") | filters.Entity("text_link"), handle_url))
 
     application.run_polling()
 
