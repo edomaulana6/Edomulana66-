@@ -30,7 +30,7 @@ fi
 echo "Memulai bot di latar belakang..."
 
 # Jalankan bot menggunakan nohup, arahkan output ke log
-nohup python bot.py > $LOG_FILE 2>&1 &
+nohup python3 bot.py > $LOG_FILE 2>&1 &
 
 # Simpan ID Proses (PID) dari proses yang baru saja dimulai
 echo $! > $PID_FILE
