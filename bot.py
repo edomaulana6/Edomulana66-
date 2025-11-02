@@ -21,9 +21,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# States for conversations
-GET_TITLE = 0
-GET_URL = 2
 
 # --- Helper Functions ---
 
@@ -147,39 +144,6 @@ async def perform_song_download(query: str, update: Update, context: CallbackCon
         if base_path and base_path != final_path and os.path.exists(base_path):
             os.remove(base_path)
 
-# --- Conversation Handlers ---
-
-async def search_start(update: Update, context: CallbackContext) -> int:
-    """Starts the /search conversation by asking for the title."""
-    await update.message.reply_text("Apa judul lagu yang ingin Anda cari? (Ketik /cancel untuk batal)")
-    return GET_TITLE
-
-async def song_start(update: Update, context: CallbackContext) -> int:
-    """Starts the /song conversation by asking for the title."""
-    await update.message.reply_text("Tentu, apa judul lagu yang ingin diunduh? (Ketik /cancel untuk batal)")
-    return GET_TITLE
-
-async def get_title_and_search(update: Update, context: CallbackContext) -> int:
-    """Gets title, performs search, and ends conversation."""
-    query = update.message.text
-    await perform_search(query, update, context)
-    return ConversationHandler.END
-
-async def get_title_and_download(update: Update, context: CallbackContext) -> int:
-    """Gets title, performs download, and ends conversation."""
-    query = update.message.text
-    await perform_song_download(query, update, context)
-    return ConversationHandler.END
-
-async def download_start(update: Update, context: CallbackContext) -> int:
-    """Starts the download conversation by asking for a URL."""
-    await update.message.reply_text("Silakan kirimkan URL yang ingin Anda unduh. (Ketik /cancel untuk batal)")
-    return GET_URL
-
-async def cancel(update: Update, context: CallbackContext) -> int:
-    """Cancels and ends the conversation."""
-    await update.message.reply_text("Pencarian dibatalkan.")
-    return ConversationHandler.END
 
 # --- Standard Command Handlers ---
 
@@ -202,44 +166,6 @@ async def help_command(update: Update, context: CallbackContext) -> None:
 
 # --- Download and URL handling ---
 
-async def get_url_and_process(update: Update, context: CallbackContext) -> int:
-    """Receives a URL in a conversation and processes it."""
-    entities = update.message.entities
-    url_entity = next((e for e in entities if e.type in ("url", "text_link")), None)
-
-    if not url_entity:
-        await update.message.reply_text("URL tidak ditemukan. Mohon kirim satu URL yang valid.")
-        return GET_URL
-
-    if url_entity.type == "text_link":
-        url = url_entity.url
-    else:
-        url = update.message.text[url_entity.offset : url_entity.offset + url_entity.length]
-
-    message = await update.message.reply_text(f"🔎 Memproses URL: {url}...")
-    try:
-        with yt_dlp.YoutubeDL({'quiet': True, 'noplaylist': True}) as ydl:
-            info = ydl.extract_info(url, download=False)
-
-        key = str(uuid.uuid4())
-        context.user_data[key] = url
-
-        caption = f"🎬 *{info.get('title', 'Tanpa Judul')}*"
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("🎧 Audio", callback_data=f"dl:audio:urlkey:{key}"),
-            InlineKeyboardButton("🎬 Video", callback_data=f"dl:video:urlkey:{key}"),
-        ]])
-
-        await message.delete()
-        if thumbnail := info.get('thumbnail'):
-            await update.message.reply_photo(photo=thumbnail, caption=caption, reply_markup=keyboard, parse_mode='Markdown')
-        else:
-            await update.message.reply_text(caption, reply_markup=keyboard, parse_mode='Markdown')
-    except Exception as e:
-        logger.error(f"Error processing URL {url}: {e}")
-        await message.edit_text("Gagal memproses URL. Pastikan link tersebut didukung.")
-
-    return ConversationHandler.END
 
 async def download_button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
@@ -343,48 +269,80 @@ async def download_file(identifier: str, format_choice: str, update: Update, con
         if base_path and base_path != final_path and os.path.exists(base_path):
             os.remove(base_path)
 
+# --- New, Simplified Command Handlers ---
+async def search_command(update: Update, context: CallbackContext):
+    """Handles /search command with arguments."""
+    query = " ".join(context.args)
+    if not query:
+        await update.message.reply_text("Silakan berikan judul untuk dicari. Contoh: `/search Judul Lagu`")
+        return
+    await perform_search(query, update, context)
+
+async def song_command(update: Update, context: CallbackContext):
+    """Handles /song command with arguments."""
+    query = " ".join(context.args)
+    if not query:
+        await update.message.reply_text("Silakan berikan judul untuk diunduh. Contoh: `/song Judul Lagu`")
+        return
+    await perform_song_download(query, update, context)
+
+async def url_handler(update: Update, context: CallbackContext):
+    """Handles direct messages containing a URL."""
+    entities = update.message.entities
+    url_entity = next((e for e in entities if e.type in ("url", "text_link")), None)
+
+    if not url_entity: # Should not happen with the filter, but as a safeguard
+        return
+
+    if url_entity.type == "text_link":
+        url = url_entity.url
+    else:
+        url = update.message.text[url_entity.offset : url_entity.offset + url_entity.length]
+
+    message = await update.message.reply_text(f"🔎 Memproses URL: {url}...")
+    try:
+        with yt_dlp.YoutubeDL({'quiet': True, 'noplaylist': True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+
+        key = str(uuid.uuid4())
+        context.user_data[key] = url
+
+        caption = f"🎬 *{info.get('title', 'Tanpa Judul')}*"
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🎧 Audio", callback_data=f"dl:audio:urlkey:{key}"),
+            InlineKeyboardButton("🎬 Video", callback_data=f"dl:video:urlkey:{key}"),
+        ]])
+
+        await message.delete()
+        if thumbnail := info.get('thumbnail'):
+            await update.message.reply_photo(photo=thumbnail, caption=caption, reply_markup=keyboard, parse_mode='Markdown')
+        else:
+            await update.message.reply_text(caption, reply_markup=keyboard, parse_mode='Markdown')
+    except Exception as e:
+        logger.error(f"Error processing URL {url}: {e}")
+        await message.edit_text("Gagal memproses URL. Pastikan link tersebut didukung.")
+
+
 def main() -> None:
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
         logger.error("TELEGRAM_TOKEN environment variable not set.")
         return
 
-    # --- Persistensi ---
-    # Membuat objek persistensi untuk menyimpan data bot
     persistence = PicklePersistence(filepath="bot_persistence")
-
     application = Application.builder().token(token).persistence(persistence).build()
 
-    # Conversation handlers
-    search_conv = ConversationHandler(
-        entry_points=[CommandHandler("search", search_start)],
-        states={ GET_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_title_and_search)] },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
-    song_conv = ConversationHandler(
-        entry_points=[CommandHandler("song", song_start)],
-        states={ GET_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_title_and_download)] },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
-
-    application.add_handler(search_conv)
-    application.add_handler(song_conv)
-
-    # Conversation handler for the new /download command
-    download_conv = ConversationHandler(
-        entry_points=[CommandHandler("download", download_start)],
-        states={
-            GET_URL: [MessageHandler(filters.Entity("url") | filters.Entity("text_link"), get_url_and_process)]
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
-    application.add_handler(download_conv)
-
-    # Other handlers
+    # --- Simplified Handlers ---
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("search", search_command))
+    application.add_handler(CommandHandler("song", song_command))
+
+    # Handler for URLs
+    application.add_handler(MessageHandler(filters.Entity("url") | filters.Entity("text_link"), url_handler))
+
+    # Callback handler for download buttons - THIS IS GLOBAL
     application.add_handler(CallbackQueryHandler(download_button, pattern="^dl:"))
-    # The automatic URL handler is now removed.
 
     application.run_polling()
 
