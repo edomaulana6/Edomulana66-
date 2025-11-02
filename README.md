@@ -60,5 +60,5 @@ Sebelum Anda mulai, pastikan Anda telah menginstal yang berikut di lingkungan Te
 -   `/song`: Langsung mencari dan mengunduh lagu teratas yang cocok dengan kueri Anda sebagai file MP3.
 -   `/download`: Meminta Anda untuk menyediakan URL untuk diunduh, lalu menampilkan pilihan format (audio/video).
 -   `/enhance_photo`: Memulai alur kerja untuk meningkatkan kualitas foto. Bot akan meminta foto dan menawarkan pilihan peningkatan (tajamkan, kontras).
--   `/convert_video`: Memulai alur kerja untuk mengonversi resolusi video. Bot akan meminta video dan menawarkan pilihan resolusi target (720p, 480p, 360p).
+-   `/convert_video`: Memulai alur kerja untuk mengonversi resolusi video. Bot akan meminta video dan menawarkan pilihan resolusi target (dari 360p hingga 4K). Video secara otomatis dikompres untuk menjaga ukuran file tetap terkendali.
 -   `/cancel`: Membatalkan operasi saat ini (seperti pencarian atau unduhan).

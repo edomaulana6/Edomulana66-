@@ -497,9 +497,16 @@ def main() -> None:
         context.user_data['video_path'] = video_path
 
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("720p", callback_data="convert:720p")],
-            [InlineKeyboardButton("480p", callback_data="convert:480p")],
-            [InlineKeyboardButton("360p", callback_data="convert:360p")],
+            [
+                InlineKeyboardButton("4K", callback_data="convert:4k"),
+                InlineKeyboardButton("2K", callback_data="convert:2k"),
+                InlineKeyboardButton("1080p", callback_data="convert:1080p"),
+            ],
+            [
+                InlineKeyboardButton("720p", callback_data="convert:720p"),
+                InlineKeyboardButton("480p", callback_data="convert:480p"),
+                InlineKeyboardButton("360p", callback_data="convert:360p"),
+            ],
         ])
         await update.message.reply_text("Pilih resolusi target:", reply_markup=keyboard)
         return GET_RESOLUTION

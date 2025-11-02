@@ -24,6 +24,9 @@ def convert_video_resolution(input_path: str, target_resolution: str) -> str:
     # Map friendly names to ffmpeg scale parameters
     # -2 ensures the width is divisible by 2, which is required by many codecs.
     resolution_map = {
+        "4k": "scale=-2:2160",
+        "2k": "scale=-2:1440",
+        "1080p": "scale=-2:1080",
         "720p": "scale=-2:720",
         "480p": "scale=-2:480",
         "360p": "scale=-2:360",
@@ -38,8 +41,10 @@ def convert_video_resolution(input_path: str, target_resolution: str) -> str:
         'ffmpeg',
         '-i', input_path,
         '-vf', scale_param,
-        '-c:a', 'copy',  # Copy audio stream without re-encoding
-        '-y',            # Overwrite output file if it exists
+        '-c:v', 'libx264', # Specify the video codec
+        '-crf', '28',      # Apply Constant Rate Factor for compression
+        '-c:a', 'copy',    # Copy audio stream without re-encoding
+        '-y',              # Overwrite output file if it exists
         output_path
     ]
 
