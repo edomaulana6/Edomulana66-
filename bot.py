@@ -56,8 +56,8 @@ async def perform_search(query: str, update: Update, context: CallbackContext):
                     duration = f"{video.get('duration', 0) // 60}:{video.get('duration', 0) % 60:02d}"
                     caption = f"🎵 *{title}*\n⏱️ Durasi: {duration}"
                     keyboard = InlineKeyboardMarkup([[
-                        InlineKeyboardButton("🎧 Audio", callback_data=f"dl:audio:id:{video_id}"),
-                        InlineKeyboardButton("🎬 Video", callback_data=f"dl:video:id:{video_id}"),
+                        InlineKeyboardButton("🎧 Audio", callback_data=f"dl_search:audio:{video_id}"),
+                        InlineKeyboardButton("🎬 Video", callback_data=f"dl_search:video:{video_id}"),
                     ]])
                     if thumbnail := video.get('thumbnail'):
                         await update.message.reply_photo(photo=thumbnail, caption=caption, reply_markup=keyboard, parse_mode='Markdown')
@@ -149,8 +149,8 @@ async def handle_url(url: str, update: Update, context: CallbackContext) -> None
         context.user_data[key] = url
         caption = f"🎬 *{info.get('title', 'Tanpa Judul')}*"
         keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("🎧 Audio", callback_data=f"dl:audio:urlkey:{key}"),
-            InlineKeyboardButton("🎬 Video", callback_data=f"dl:video:urlkey:{key}"),
+            InlineKeyboardButton("🎧 Audio", callback_data=f"dl_url:audio:{key}"),
+            InlineKeyboardButton("🎬 Video", callback_data=f"dl_url:video:{key}"),
         ]])
         await message.delete()
         if thumbnail := info.get('thumbnail'):
@@ -161,27 +161,49 @@ async def handle_url(url: str, update: Update, context: CallbackContext) -> None
         logger.error(f"Error processing URL {url}: {e}")
         await message.edit_text("Gagal memproses URL. Pastikan link tersebut didukung.")
 
-async def download_button(update: Update, context: CallbackContext) -> None:
+async def handle_search_download(update: Update, context: CallbackContext) -> None:
+    """Handles download callbacks from search results (using video ID)."""
     query = update.callback_query
     await query.answer()
-    sticker_message = None
     try:
-        _, format_choice, source_type, value = query.data.split(':', 3)
+        _, format_choice, video_id = query.data.split(':', 2)
     except ValueError:
-        await query.edit_message_text("❌ Terjadi kesalahan: Callback tidak valid.")
+        await query.edit_message_text("❌ Terjadi kesalahan: Callback pencarian tidak valid.")
         return
-    identifier = context.user_data.get(value) if source_type == 'urlkey' else value
-    if not identifier:
-        await query.message.reply_text("❌ Link unduhan sudah kedaluwarsa. Silakan mulai ulang perintah.")
-        await query.edit_message_reply_markup(reply_markup=None)
-        return
+
     await query.edit_message_reply_markup(reply_markup=None)
     sticker_message = await query.message.reply_sticker("CAACAgIAAxkBAAIEv2X0x4-v2-5v3e_wY_v2-5v3e_wYAAJ-BwAC-5-xS_v2-5v3e_wYHgQ")
     try:
-        await download_file(identifier, format_choice, update, context)
+        await download_file(video_id, format_choice, update, context)
     except Exception as e:
-        logger.error(f"Error during download_file call from button: {e}")
-        await query.message.reply_text("❌ Gagal mengunduh file.")
+        logger.error(f"Error during download_file call from search: {e}")
+        await query.message.reply_text("❌ Gagal mengunduh file dari hasil pencarian.")
+    finally:
+        if sticker_message: await sticker_message.delete()
+
+async def handle_url_download(update: Update, context: CallbackContext) -> None:
+    """Handles download callbacks from a submitted URL (using a UUID key)."""
+    query = update.callback_query
+    await query.answer()
+    try:
+        _, format_choice, url_key = query.data.split(':', 2)
+    except ValueError:
+        await query.edit_message_text("❌ Terjadi kesalahan: Callback URL tidak valid.")
+        return
+
+    url = context.user_data.get(url_key)
+    if not url:
+        await query.message.reply_text("❌ Link unduhan sudah kedaluwarsa. Silakan kirim ulang URL.")
+        await query.edit_message_reply_markup(reply_markup=None)
+        return
+
+    await query.edit_message_reply_markup(reply_markup=None)
+    sticker_message = await query.message.reply_sticker("CAACAgIAAxkBAAIEv2X0x4-v2-5v3e_wY_v2-5v3e_wYAAJ-BwAC-5-xS_v2-5v3e_wYHgQ")
+    try:
+        await download_file(url, format_choice, update, context)
+    except Exception as e:
+        logger.error(f"Error during download_file call from URL: {e}")
+        await query.message.reply_text("❌ Gagal mengunduh file dari URL.")
     finally:
         if sticker_message: await sticker_message.delete()
 
@@ -311,9 +333,13 @@ async def apply_conversion(update: Update, context: CallbackContext) -> int:
 
 def main() -> None:
     token = os.getenv("TELEGRAM_TOKEN")
-    if not token:
-        logger.error("TELEGRAM_TOKEN environment variable not set.")
+    if not token or token == "GANTI_DENGAN_TOKEN_ANDA" or token == "":
+        logger.error("--- KESALAHAN KONFIGURASI ---")
+        logger.error("Token Telegram tidak valid atau belum diatur.")
+        logger.error("Silakan buka file '.env' dan ganti 'GANTI_DENGAN_TOKEN_ANDA' dengan token bot Anda yang sebenarnya.")
+        logger.error("Jika file .env belum ada, jalankan 'python3 setup.py'.")
         return
+
     persistence = PicklePersistence(filepath="bot_persistence")
 
     async def send_online_message(application: Application) -> None:
@@ -363,8 +389,9 @@ def main() -> None:
     application.add_handler(CommandHandler("download", download_command))
     application.add_handler(CommandHandler("song", song_command))
 
-    # --- Global Callback Handler ---
-    application.add_handler(CallbackQueryHandler(download_button, pattern="^dl:"))
+    # --- Specific Callback Handlers ---
+    application.add_handler(CallbackQueryHandler(handle_search_download, pattern="^dl_search:"))
+    application.add_handler(CallbackQueryHandler(handle_url_download, pattern="^dl_url:"))
 
     # --- User ID Storage ---
     async def store_user_id(update: Update, context: CallbackContext) -> None:
@@ -395,3 +422,6 @@ def main() -> None:
     application.add_handler(convert_conv)
 
     application.run_polling()
+
+if __name__ == "__main__":
+    main()
