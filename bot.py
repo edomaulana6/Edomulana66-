@@ -358,7 +358,33 @@ def main() -> None:
     # Membuat objek persistensi untuk menyimpan data bot
     persistence = PicklePersistence(filepath="bot_persistence")
 
-    application = Application.builder().token(token).persistence(persistence).build()
+    # --- Startup/Shutdown Hooks ---
+    async def send_online_message(application: Application) -> None:
+        """Sends 'BOT ONLINE' message to all known users on startup."""
+        user_ids = application.bot_data.get('user_ids', set())
+        for user_id in user_ids:
+            try:
+                await application.bot.send_message(chat_id=user_id, text="BOT ONLINE ✅")
+            except Exception as e:
+                logger.warning(f"Could not send online message to {user_id}: {e}")
+
+    async def send_offline_message(application: Application) -> None:
+        """Sends 'BOT OFFLINE' message to all known users on shutdown."""
+        user_ids = application.bot_data.get('user_ids', set())
+        for user_id in user_ids:
+            try:
+                await application.bot.send_message(chat_id=user_id, text="BOT OFFLINE ✅")
+            except Exception as e:
+                logger.warning(f"Could not send offline message to {user_id}: {e}")
+
+    application = (
+        Application.builder()
+        .token(token)
+        .persistence(persistence)
+        .post_init(send_online_message)
+        .post_shutdown(send_offline_message)
+        .build()
+    )
 
     # Conversation handlers
     search_conv = ConversationHandler(
@@ -380,6 +406,17 @@ def main() -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CallbackQueryHandler(download_button, pattern="^dl:"))
     # application.add_handler(MessageHandler(filters.Entity("url") | filters.Entity("text_link"), handle_url)) # REMOVED to implement /download command
+
+    # --- User ID Storage ---
+    async def store_user_id(update: Update, context: CallbackContext) -> None:
+        """Saves the user's chat_id to bot_data for broadcast purposes."""
+        if 'user_ids' not in context.bot_data:
+            context.bot_data['user_ids'] = set()
+        context.bot_data['user_ids'].add(update.effective_chat.id)
+
+    # Add this handler with a low priority (high group number) to not interfere with other handlers.
+    application.add_handler(MessageHandler(filters.ALL, store_user_id), group=1)
+
 
     # --- URL Download Conversation ---
     async def download_start(update: Update, context: CallbackContext) -> int:
