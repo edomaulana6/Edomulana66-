@@ -192,10 +192,12 @@ async def start(update: Update, context: CallbackContext) -> None:
 async def help_command(update: Update, context: CallbackContext) -> None:
     await update.message.reply_markdown(
         "*Bantuan Perintah*\n\n"
-        "`/search` - Memulai pencarian interaktif untuk 5 lagu teratas.\n"
-        "`/song` - Memulai pencarian interaktif untuk mengunduh lagu teratas.\n"
-        "`/cancel` - Membatalkan proses pencarian yang sedang berjalan.\n\n"
-        "Anda juga bisa mengirimkan URL YouTube (atau situs lain) langsung ke saya untuk mendapatkan pilihan unduhan."
+        "`/search` - Mencari video/musik dan menampilkan 5 hasil teratas.\n"
+        "`/song` - Langsung mengunduh lagu teratas yang cocok dengan pencarian.\n"
+        "`/download` - Mengunduh media dari sebuah URL.\n"
+        "`/enhance_photo` - Meningkatkan kualitas sebuah foto.\n"
+        "`/convert_video` - Mengubah resolusi sebuah video.\n"
+        "`/cancel` - Membatalkan operasi yang sedang berjalan."
     )
 
 # --- Download and URL handling ---
@@ -398,13 +400,16 @@ def main() -> None:
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
+    # IMPORTANT: CallbackQueryHandler for downloads must be registered BEFORE any ConversationHandlers
+    # that might also handle CallbackQueryUpdates, to ensure it gets priority on its pattern.
+    application.add_handler(CallbackQueryHandler(download_button, pattern="^dl:"))
+
     application.add_handler(search_conv)
     application.add_handler(song_conv)
 
     # Other handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CallbackQueryHandler(download_button, pattern="^dl:"))
     # application.add_handler(MessageHandler(filters.Entity("url") | filters.Entity("text_link"), handle_url)) # REMOVED to implement /download command
 
     # --- User ID Storage ---
