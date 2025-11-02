@@ -56,9 +56,9 @@ Sebelum Anda mulai, pastikan Anda telah menginstal yang berikut di lingkungan Te
 
 -   `/start`: Memulai interaksi dengan bot.
 -   `/help`: Menampilkan pesan bantuan dengan daftar semua perintah yang tersedia.
--   `/search`: Memulai pencarian interaktif untuk video. Bot akan menampilkan 5 hasil teratas dengan tombol untuk mengunduh sebagai audio atau video.
--   `/song`: Langsung mencari dan mengunduh lagu teratas yang cocok dengan kueri Anda sebagai file MP3.
--   `/download`: Meminta Anda untuk menyediakan URL untuk diunduh, lalu menampilkan pilihan format (audio/video).
--   `/enhance_photo`: Memulai alur kerja untuk meningkatkan kualitas foto. Bot akan meminta foto dan menawarkan pilihan peningkatan (tajamkan, kontras).
--   `/convert_video`: Memulai alur kerja untuk mengonversi resolusi video. Bot akan meminta video dan menawarkan pilihan resolusi target (dari 360p hingga 4K). Video secara otomatis dikompres untuk menjaga ukuran file tetap terkendali.
--   `/cancel`: Membatalkan operasi saat ini (seperti pencarian atau unduhan).
+-   `/search <query>`: Mencari video/musik berdasarkan kueri yang diberikan.
+-   `/song <query>`: Langsung mengunduh lagu teratas yang cocok dengan kueri Anda.
+-   `/download <url>`: Mengunduh media dari URL yang diberikan.
+-   `/enhance_photo`: Memulai alur interaktif untuk meningkatkan kualitas foto.
+-   `/convert_video`: Memulai alur interaktif untuk mengubah resolusi video.
+-   `/cancel`: Membatalkan operasi interaktif yang sedang berjalan (misalnya, `/enhance_photo`).
