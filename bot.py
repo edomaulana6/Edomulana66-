@@ -22,7 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # States for conversations
-GET_TITLE, GET_PHOTO, GET_ENHANCEMENT, GET_VIDEO, GET_RESOLUTION, GET_URL = range(6)
+GET_TITLE, GET_PHOTO, GET_ENHANCEMENT, GET_VIDEO, GET_RESOLUTION, GET_URL, AWAIT_DOWNLOAD_CHOICE = range(7)
 
 # --- Feature Imports ---
 from image_enhancer import enhance_photo
@@ -389,12 +389,25 @@ def main() -> None:
     )
 
     # Conversation handlers
+    async def search_and_await_choice(update: Update, context: CallbackContext) -> int:
+        """Gets title, performs search, and waits for a button press."""
+        query = update.message.text
+        await perform_search(query, update, context)
+        return AWAIT_DOWNLOAD_CHOICE
+
+    async def download_choice_and_end(update: Update, context: CallbackContext) -> int:
+        """Handles the download button press and ends the conversation."""
+        await download_button(update, context)
+        return ConversationHandler.END
+
     search_conv = ConversationHandler(
         entry_points=[CommandHandler("search", search_start)],
         states={
-            GET_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_title_and_search)]
+            GET_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_and_await_choice)],
+            AWAIT_DOWNLOAD_CHOICE: [CallbackQueryHandler(download_choice_and_end, pattern="^dl:")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        conversation_timeout=600  # 10 minutes to choose a download
     )
     song_conv = ConversationHandler(
         entry_points=[CommandHandler("song", song_start)],
@@ -408,7 +421,6 @@ def main() -> None:
     # Other handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CallbackQueryHandler(download_button, pattern="^dl:"))
     # application.add_handler(MessageHandler(filters.Entity("url") | filters.Entity("text_link"), handle_url)) # REMOVED to implement /download command
 
     # --- User ID Storage ---
@@ -429,16 +441,18 @@ def main() -> None:
         return GET_URL
 
     async def get_url_and_process(update: Update, context: CallbackContext) -> int:
-        """Receives a URL and passes it to the handler."""
+        """Receives a URL, processes it, and moves to the next state."""
         await handle_url(update, context)
-        return ConversationHandler.END
+        return AWAIT_DOWNLOAD_CHOICE
 
     download_conv = ConversationHandler(
         entry_points=[CommandHandler("download", download_start)],
         states={
-            GET_URL: [MessageHandler(filters.Entity("url") | filters.Entity("text_link"), get_url_and_process)]
+            GET_URL: [MessageHandler(filters.Entity("url") | filters.Entity("text_link"), get_url_and_process)],
+            AWAIT_DOWNLOAD_CHOICE: [CallbackQueryHandler(download_choice_and_end, pattern="^dl:")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        conversation_timeout=600  # 10 minutes to choose a download
     )
     application.add_handler(download_conv)
 
