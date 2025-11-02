@@ -21,17 +21,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# States for conversations
-GET_TITLE = 0
-GET_URL = 2
+# States for the remaining conversations
+GET_PHOTO, GET_ENHANCEMENT, GET_VIDEO, GET_RESOLUTION = range(4)
+
+# --- Feature Imports ---
+from image_enhancer import enhance_photo
+from video_converter import convert_video_resolution
 
 # --- Helper Functions ---
 
 async def perform_search(query: str, update: Update, context: CallbackContext):
     """Performs a more resilient YouTube search and sends results."""
     await update.message.reply_text(f"🔎 Mencari 5 teratas untuk: *{query}*...", parse_mode='Markdown')
-    # By removing 'extract_flat', we ask for full metadata, which is more reliable
-    # even if slightly slower.
     ydl_opts = {
         'format': 'bestaudio/best',
         'noplaylist': True,
@@ -48,7 +49,6 @@ async def perform_search(query: str, update: Update, context: CallbackContext):
                 return
 
             await update.message.reply_text("Menampilkan hasil yang valid:")
-            sent_count = 0
             for video in videos:
                 try:
                     video_id = video.get('id')
@@ -63,15 +63,9 @@ async def perform_search(query: str, update: Update, context: CallbackContext):
                         await update.message.reply_photo(photo=thumbnail, caption=caption, reply_markup=keyboard, parse_mode='Markdown')
                     else:
                         await update.message.reply_text(caption, reply_markup=keyboard, parse_mode='Markdown')
-                    sent_count += 1
                 except Exception as e:
                     logger.error(f"Failed to process and send one search result ({video.get('id')}): {e}")
-                    # Skip this item and continue with the next one
                     continue
-
-            if sent_count == 0:
-                await update.message.reply_text("Maaf, semua hasil pencarian gagal ditampilkan. Mungkin ada masalah dengan data dari YouTube.")
-
     except Exception as e:
         logger.error(f"Error during initial yt-dlp search: {e}")
         await update.message.reply_text("Maaf, terjadi kesalahan fatal saat melakukan pencarian.")
@@ -79,25 +73,17 @@ async def perform_search(query: str, update: Update, context: CallbackContext):
 async def perform_song_download(query: str, update: Update, context: CallbackContext):
     """Finds the top song, downloads it as MP3, and sends it."""
     message = await update.message.reply_text(f"🔎 Mencari & mengunduh: *{query}*...", parse_mode='Markdown')
-
     download_dir = 'downloads'
     os.makedirs(download_dir, exist_ok=True)
-
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': os.path.join(download_dir, '%(title)s.%(ext)s'),
         'noplaylist': True,
         'quiet': True,
         'default_search': 'ytsearch1',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }]
+        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
     }
-
-    final_path = ""
-    base_path = ""
+    final_path, base_path = "", ""
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             result = ydl.extract_info(f"ytsearch1:{query}", download=True)
@@ -106,17 +92,12 @@ async def perform_song_download(query: str, update: Update, context: CallbackCon
                 return
             info_dict = result['entries'][0]
             base_path = ydl.prepare_filename(info_dict)
-
         final_path = os.path.splitext(base_path)[0] + '.mp3'
         if not os.path.exists(final_path):
             raise FileNotFoundError(f"File MP3 tidak ditemukan setelah konversi: {final_path}")
-
         await message.edit_text(f"✅ Unduhan selesai. Mengirim *{info_dict.get('title', 'file')}*...", parse_mode='Markdown')
-
         sanitized_title = re.sub(r'[\\/*?:"<>|]', "", info_dict.get('title', 'video'))
         telegram_filename = f"{sanitized_title}.mp3"
-
-        # Baca thumbnail ke dalam memori jika ada
         thumbnail_data = None
         if thumbnail_url := info_dict.get('thumbnail'):
             import requests
@@ -126,110 +107,51 @@ async def perform_song_download(query: str, update: Update, context: CallbackCon
                 thumbnail_data = response.content
             except requests.RequestException as e:
                 logger.warning(f"Gagal mengunduh thumbnail: {e}")
-
         with open(final_path, 'rb') as file_to_send:
-            await update.message.reply_audio(
-                file_to_send,
-                caption=info_dict.get('title'),
-                title=info_dict.get('title'),
-                filename=telegram_filename,
-                thumbnail=thumbnail_data
-            )
-
+            await update.message.reply_audio(file_to_send, caption=info_dict.get('title'), title=info_dict.get('title'), filename=telegram_filename, thumbnail=thumbnail_data)
         await message.delete()
-
     except Exception as e:
         logger.error(f"Error during song download for query '{query}': {e}")
         await message.edit_text("Maaf, terjadi kesalahan fatal saat mengunduh lagu.")
     finally:
-        if os.path.exists(final_path):
-            os.remove(final_path)
-        if base_path and base_path != final_path and os.path.exists(base_path):
-            os.remove(base_path)
-
-# --- Conversation Handlers ---
-
-async def search_start(update: Update, context: CallbackContext) -> int:
-    """Starts the /search conversation by asking for the title."""
-    await update.message.reply_text("Apa judul lagu yang ingin Anda cari? (Ketik /cancel untuk batal)")
-    return GET_TITLE
-
-async def song_start(update: Update, context: CallbackContext) -> int:
-    """Starts the /song conversation by asking for the title."""
-    await update.message.reply_text("Tentu, apa judul lagu yang ingin diunduh? (Ketik /cancel untuk batal)")
-    return GET_TITLE
-
-async def get_title_and_search(update: Update, context: CallbackContext) -> int:
-    """Gets title, performs search, and ends conversation."""
-    query = update.message.text
-    await perform_search(query, update, context)
-    return ConversationHandler.END
-
-async def get_title_and_download(update: Update, context: CallbackContext) -> int:
-    """Gets title, performs download, and ends conversation."""
-    query = update.message.text
-    await perform_song_download(query, update, context)
-    return ConversationHandler.END
-
-async def download_start(update: Update, context: CallbackContext) -> int:
-    """Starts the download conversation by asking for a URL."""
-    await update.message.reply_text("Silakan kirimkan URL yang ingin Anda unduh. (Ketik /cancel untuk batal)")
-    return GET_URL
+        if os.path.exists(final_path): os.remove(final_path)
+        if base_path and base_path != final_path and os.path.exists(base_path): os.remove(base_path)
 
 async def cancel(update: Update, context: CallbackContext) -> int:
-    """Cancels and ends the conversation."""
-    await update.message.reply_text("Pencarian dibatalkan.")
+    await update.message.reply_text("Operasi dibatalkan.")
     return ConversationHandler.END
 
 # --- Standard Command Handlers ---
 
 async def start(update: Update, context: CallbackContext) -> None:
     user = update.effective_user
-    await update.message.reply_html(
-        f"👋 Halo {user.mention_html()}!\n\n"
-        "Gunakan `/search` atau `/song` untuk memulai pencarian lagu.\n"
-        "Anda juga bisa mengirimkan link URL langsung untuk diunduh."
-    )
+    await update.message.reply_html(f"👋 Halo {user.mention_html()}!\n\nGunakan `/help` untuk melihat semua perintah.")
 
 async def help_command(update: Update, context: CallbackContext) -> None:
     await update.message.reply_markdown(
         "*Bantuan Perintah*\n\n"
-        "`/search` - Memulai pencarian interaktif untuk 5 lagu teratas.\n"
-        "`/song` - Memulai pencarian interaktif untuk mengunduh lagu teratas.\n"
-        "`/cancel` - Membatalkan proses pencarian yang sedang berjalan.\n\n"
-        "Anda juga bisa mengirimkan URL YouTube (atau situs lain) langsung ke saya untuk mendapatkan pilihan unduhan."
+        "`/search <query>` - Mencari video/musik.\n"
+        "`/song <query>` - Langsung mengunduh lagu teratas.\n"
+        "`/download <url>` - Mengunduh media dari sebuah URL.\n"
+        "`/enhance_photo` - Meningkatkan kualitas sebuah foto (interaktif).\n"
+        "`/convert_video` - Mengubah resolusi sebuah video (interaktif).\n"
+        "`/cancel` - Membatalkan operasi interaktif."
     )
 
 # --- Download and URL handling ---
 
-async def get_url_and_process(update: Update, context: CallbackContext) -> int:
-    """Receives a URL in a conversation and processes it."""
-    entities = update.message.entities
-    url_entity = next((e for e in entities if e.type in ("url", "text_link")), None)
-
-    if not url_entity:
-        await update.message.reply_text("URL tidak ditemukan. Mohon kirim satu URL yang valid.")
-        return GET_URL
-
-    if url_entity.type == "text_link":
-        url = url_entity.url
-    else:
-        url = update.message.text[url_entity.offset : url_entity.offset + url_entity.length]
-
+async def handle_url(url: str, update: Update, context: CallbackContext) -> None:
     message = await update.message.reply_text(f"🔎 Memproses URL: {url}...")
     try:
         with yt_dlp.YoutubeDL({'quiet': True, 'noplaylist': True}) as ydl:
             info = ydl.extract_info(url, download=False)
-
         key = str(uuid.uuid4())
         context.user_data[key] = url
-
         caption = f"🎬 *{info.get('title', 'Tanpa Judul')}*"
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("🎧 Audio", callback_data=f"dl:audio:urlkey:{key}"),
             InlineKeyboardButton("🎬 Video", callback_data=f"dl:video:urlkey:{key}"),
         ]])
-
         await message.delete()
         if thumbnail := info.get('thumbnail'):
             await update.message.reply_photo(photo=thumbnail, caption=caption, reply_markup=keyboard, parse_mode='Markdown')
@@ -239,79 +161,53 @@ async def get_url_and_process(update: Update, context: CallbackContext) -> int:
         logger.error(f"Error processing URL {url}: {e}")
         await message.edit_text("Gagal memproses URL. Pastikan link tersebut didukung.")
 
-    return ConversationHandler.END
-
 async def download_button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     await query.answer()
+    sticker_message = None
     try:
         _, format_choice, source_type, value = query.data.split(':', 3)
     except ValueError:
         await query.edit_message_text("❌ Terjadi kesalahan: Callback tidak valid.")
         return
-
     identifier = context.user_data.get(value) if source_type == 'urlkey' else value
     if not identifier:
-        await query.edit_message_text("❌ Link unduhan sudah kedaluwarsa. Silakan kirim ulang URL atau lakukan pencarian lagi.")
+        await query.message.reply_text("❌ Link unduhan sudah kedaluwarsa. Silakan mulai ulang perintah.")
+        await query.edit_message_reply_markup(reply_markup=None)
         return
-
-    original_message = await query.edit_message_text(text=f"⏳ Mempersiapkan unduhan {format_choice}...")
+    await query.edit_message_reply_markup(reply_markup=None)
+    sticker_message = await query.message.reply_sticker("CAACAgIAAxkBAAIEv2X0x4-v2-5v3e_wY_v2-5v3e_wYAAJ-BwAC-5-xS_v2-5v3e_wYHgQ")
     try:
         await download_file(identifier, format_choice, update, context)
-        await original_message.delete()
     except Exception as e:
-        logger.error(f"Error during download_file call: {e}")
-        await original_message.edit_text(text="❌ Gagal mengunduh file.")
+        logger.error(f"Error during download_file call from button: {e}")
+        await query.message.reply_text("❌ Gagal mengunduh file.")
+    finally:
+        if sticker_message: await sticker_message.delete()
 
 async def download_file(identifier: str, format_choice: str, update: Update, context: CallbackContext):
-    """Mengunduh file berdasarkan URL atau ID, mengirimkannya, dan membersihkan."""
     url = identifier if re.match(r'https?://', identifier) else f"https://www.youtube.com/watch?v={identifier}"
     download_dir = 'downloads'
     os.makedirs(download_dir, exist_ok=True)
-
-    # Gunakan template nama file yang aman untuk sistem file.
     file_path_template = os.path.join(download_dir, '%(id)s.%(ext)s')
-
-    ydl_opts = {
-        'outtmpl': file_path_template,
-        'noplaylist': True,
-        'quiet': True,
-    }
-
+    ydl_opts = {'outtmpl': file_path_template, 'noplaylist': True, 'quiet': True}
     if format_choice == 'audio':
         ydl_opts['format'] = 'bestaudio/best'
-        ydl_opts['postprocessors'] = [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }]
+        ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
     else:
         ydl_opts['format'] = 'best'
-
-    final_path = ""
-    base_path = ""
+    final_path, base_path = "", ""
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Unduh dan dapatkan info dalam satu langkah
             info_dict = ydl.extract_info(url, download=True)
             base_path = ydl.prepare_filename(info_dict)
-
-        # Tentukan path akhir setelah potensi konversi
         final_path = os.path.splitext(base_path)[0] + '.mp3' if format_choice == 'audio' else base_path
-
         if not os.path.exists(final_path):
-            if os.path.exists(base_path):
-                final_path = base_path  # Fallback jika konversi gagal
-            else:
-                raise FileNotFoundError(f"File tidak ditemukan setelah diunduh: {final_path} atau {base_path}")
-
+            if os.path.exists(base_path): final_path = base_path
+            else: raise FileNotFoundError(f"File tidak ditemukan: {final_path} atau {base_path}")
         effective_update = update.callback_query or update.message
         caption_text = info_dict.get('title', 'File')
-
-        # Bersihkan judul untuk nama file yang dikirim ke Telegram
         sanitized_title = re.sub(r'[\\/*?:"<>|]', "", caption_text)
-
-        # Siapkan thumbnail untuk audio
         thumbnail_data = None
         if format_choice == 'audio' and (thumbnail_url := info_dict.get('thumbnail')):
             import requests
@@ -319,72 +215,101 @@ async def download_file(identifier: str, format_choice: str, update: Update, con
                 response = requests.get(thumbnail_url)
                 response.raise_for_status()
                 thumbnail_data = response.content
-            except requests.RequestException as e:
-                logger.warning(f"Gagal mengunduh thumbnail: {e}")
-
+            except requests.RequestException as e: logger.warning(f"Gagal mengunduh thumbnail: {e}")
         sender = effective_update.message.reply_audio if format_choice == 'audio' else effective_update.message.reply_video
-
         with open(final_path, 'rb') as file_to_send:
-            # Gunakan judul yang bersih untuk nama file di Telegram
             file_extension = 'mp3' if format_choice == 'audio' else info_dict.get('ext', 'mp4')
             filename = f"{sanitized_title}.{file_extension}"
-            await sender(
-                file_to_send,
-                caption=caption_text,
-                title=caption_text,
-                filename=filename,
-                thumbnail=thumbnail_data
-            )
-
+            await sender(file_to_send, caption=caption_text, title=caption_text, filename=filename, thumbnail=thumbnail_data)
     finally:
-        # Pembersihan: Pastikan semua file yang diunduh dihapus
-        if os.path.exists(final_path):
-            os.remove(final_path)
-        if base_path and base_path != final_path and os.path.exists(base_path):
-            os.remove(base_path)
+        if os.path.exists(final_path): os.remove(final_path)
+        if base_path and base_path != final_path and os.path.exists(base_path): os.remove(base_path)
 
 def main() -> None:
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
         logger.error("TELEGRAM_TOKEN environment variable not set.")
         return
-
-    # --- Persistensi ---
-    # Membuat objek persistensi untuk menyimpan data bot
     persistence = PicklePersistence(filepath="bot_persistence")
 
-    application = Application.builder().token(token).persistence(persistence).build()
+    async def send_online_message(application: Application) -> None:
+        user_ids = application.bot_data.get('user_ids', set())
+        for user_id in user_ids:
+            try:
+                await application.bot.send_message(chat_id=user_id, text="BOT ONLINE ✅")
+            except Exception as e: logger.warning(f"Could not send online message to {user_id}: {e}")
 
-    # Conversation handlers
-    search_conv = ConversationHandler(
-        entry_points=[CommandHandler("search", search_start)],
-        states={ GET_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_title_and_search)] },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
-    song_conv = ConversationHandler(
-        entry_points=[CommandHandler("song", song_start)],
-        states={ GET_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_title_and_download)] },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
+    async def send_offline_message(application: Application) -> None:
+        user_ids = application.bot_data.get('user_ids', set())
+        for user_id in user_ids:
+            try:
+                await application.bot.send_message(chat_id=user_id, text="BOT OFFLINE ✅")
+            except Exception as e: logger.warning(f"Could not send offline message to {user_id}: {e}")
 
-    application.add_handler(search_conv)
-    application.add_handler(song_conv)
+    application = Application.builder().token(token).persistence(persistence).post_init(send_online_message).post_shutdown(send_offline_message).build()
 
-    # Conversation handler for the new /download command
-    download_conv = ConversationHandler(
-        entry_points=[CommandHandler("download", download_start)],
+    # --- Direct Command Handlers (No Conversation) ---
+    async def search_command(update: Update, context: CallbackContext) -> None:
+        query = " ".join(context.args)
+        if not query:
+            await update.message.reply_text("Gunakan: `/search <query>`")
+            return
+        await perform_search(query, update, context)
+
+    async def download_command(update: Update, context: CallbackContext) -> None:
+        if not context.args:
+            await update.message.reply_text("Gunakan: `/download <url>`")
+            return
+        url = context.args[0]
+        if not re.match(r'https?://\S+', url):
+            await update.message.reply_text("URL tidak valid.")
+            return
+        await handle_url(url, update, context)
+
+    async def song_command(update: Update, context: CallbackContext) -> None:
+        query = " ".join(context.args)
+        if not query:
+            await update.message.reply_text("Gunakan: `/song <query>`")
+            return
+        await perform_song_download(query, update, context)
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("search", search_command))
+    application.add_handler(CommandHandler("download", download_command))
+    application.add_handler(CommandHandler("song", song_command))
+
+    # --- Global Callback Handler ---
+    application.add_handler(CallbackQueryHandler(download_button, pattern="^dl:"))
+
+    # --- User ID Storage ---
+    async def store_user_id(update: Update, context: CallbackContext) -> None:
+        if 'user_ids' not in context.bot_data:
+            context.bot_data['user_ids'] = set()
+        context.bot_data['user_ids'].add(update.effective_chat.id)
+    application.add_handler(MessageHandler(filters.ALL, store_user_id), group=1)
+
+    # --- Interactive Conversation Handlers (for features that need them) ---
+    enhance_conv = ConversationHandler(
+        entry_points=[CommandHandler("enhance_photo", lambda u, c: u.message.reply_text("Kirim foto untuk ditingkatkan.") or GET_PHOTO)],
         states={
-            GET_URL: [MessageHandler(filters.Entity("url") | filters.Entity("text_link"), get_url_and_process)]
+            GET_PHOTO: [MessageHandler(filters.PHOTO, get_photo)],
+            GET_ENHANCEMENT: [CallbackQueryHandler(apply_enhancement, pattern="^enhance:")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
-    application.add_handler(download_conv)
 
-    # Other handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CallbackQueryHandler(download_button, pattern="^dl:"))
-    # The automatic URL handler is now removed.
+    convert_conv = ConversationHandler(
+        entry_points=[CommandHandler("convert_video", lambda u, c: u.message.reply_text("Kirim video untuk dikonversi.") or GET_VIDEO)],
+        states={
+            GET_VIDEO: [MessageHandler(filters.VIDEO | filters.Document.VIDEO, get_video)],
+            GET_RESOLUTION: [CallbackQueryHandler(apply_conversion, pattern="^convert:")],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    application.add_handler(enhance_conv)
+    application.add_handler(convert_conv)
 
     application.run_polling()
 
