@@ -1,59 +1,64 @@
-# Bot Pengunduh Media Telegram untuk Termux
+# Bot Downloader Media Telegram
 
-Bot Telegram ini memungkinkan Anda untuk mengunduh video, audio, dan gambar dari berbagai sumber. Bot ini dirancang khusus untuk dijalankan dengan mudah di Termux.
+Bot Telegram serbaguna yang dirancang untuk berjalan di Termux, mampu mengunduh media dari berbagai URL, meningkatkan kualitas foto, dan mengonversi resolusi video.
 
 ## Fitur
-- **/search**: Mencari 5 video YouTube teratas (durasi di bawah 10 menit) berdasarkan judul.
-- **/song**: Mencari dan mengunduh lagu teratas dari YouTube sebagai file MP3.
-- **/download**: Memulai proses unduhan dari URL (mendukung video dari yt-dlp dan gambar langsung).
 
-## Instalasi & Setup
+-   **Pengunduhan Media Canggih**: Unduh audio atau video dari URL (YouTube, dll.) menggunakan perintah `/download`.
+-   **Pencarian Interaktif**: Cari video menggunakan `/search` atau langsung unduh lagu teratas dengan `/song`.
+-   **Peningkat Foto**: Tingkatkan kualitas gambar menggunakan perintah `/enhance_photo` untuk mempertajam atau menyesuaikan kontras.
+-   **Konverter Video**: Ubah resolusi video ke ukuran yang lebih kecil (720p, 480p, 360p) dengan perintah `/convert_video`.
+-   **Indikator Memuat**: Umpan balik visual dengan stiker animasi selama proses unduhan.
+-   **Instalasi Mudah**: Skrip penyiapan interaktif untuk konfigurasi token yang mudah.
 
-1.  **Persiapan di Termux:**
+## Prasyarat
+
+Sebelum Anda mulai, pastikan Anda telah menginstal yang berikut di lingkungan Termux Anda:
+
+-   **Python**: `pkg install python`
+-   **FFmpeg**: `pkg install ffmpeg` (diperlukan untuk konversi audio dan video)
+-   **Git**: `pkg install git`
+
+## Penyiapan Cepat
+
+1.  **Klon Repositori**:
     ```bash
-    pkg update && pkg upgrade
-    pkg install git python ffmpeg
+    git clone https://github.com/user/repo.git
+    cd repo
     ```
 
-2.  **Dapatkan Kode Bot:**
-    ```bash
-    git clone URL_REPOSITORI_ANDA telegram-bot
-    cd telegram-bot
-    ```
-
-3.  **Instal Dependensi Python:**
-    Skrip ini akan menginstal `yt-dlp` versi terbaru langsung dari GitHub.
+2.  **Instal Dependensi**:
     ```bash
     pip install -r requirements.txt
     ```
 
-4.  **Konfigurasi Token Bot (Cara Mudah):**
-    Jalankan skrip setup dan masukkan token bot Anda saat diminta.
+3.  **Jalankan Skrip Penyiapan Interaktif**:
+    Skrip ini akan meminta Anda untuk memasukkan token bot Telegram Anda dan secara otomatis membuat file `.env` yang diperlukan.
     ```bash
     python setup.py
     ```
 
-5.  **(Opsional) Atur Perintah Bot di @BotFather:**
-    ```
-    start - ✨ Memulai bot
-    help - 🤔 Menampilkan bantuan
-    search - 🔎 Cari video
-    song - 🎵 Unduh lagu
-    download - 🔗 Unduh dari URL
-    cancel - ❌ Batalkan operasi
-    ```
+## Cara Menjalankan Bot
 
-## Menjalankan Bot
-
-1.  **Berikan Izin Eksekusi:**
+-   **Memulai Bot**:
+    Gunakan skrip `start.sh` untuk menjalankan bot di latar belakang.
     ```bash
-    chmod +x start.sh stop.sh
+    bash start.sh
     ```
 
-2.  **Mulai & Hentikan Bot:**
+-   **Menghentikan Bot**:
+    Gunakan skrip `stop.sh` untuk menghentikan proses bot dengan aman.
     ```bash
-    ./start.sh
-    ./stop.sh
+    bash stop.sh
     ```
 
-**Penting:** Gunakan `termux-wake-lock` untuk menjaga Termux tetap aktif di latar belakang.
+## Daftar Perintah
+
+-   `/start`: Memulai interaksi dengan bot.
+-   `/help`: Menampilkan pesan bantuan dengan daftar semua perintah yang tersedia.
+-   `/search`: Memulai pencarian interaktif untuk video. Bot akan menampilkan 5 hasil teratas dengan tombol untuk mengunduh sebagai audio atau video.
+-   `/song`: Langsung mencari dan mengunduh lagu teratas yang cocok dengan kueri Anda sebagai file MP3.
+-   `/download`: Meminta Anda untuk menyediakan URL untuk diunduh, lalu menampilkan pilihan format (audio/video).
+-   `/enhance_photo`: Memulai alur kerja untuk meningkatkan kualitas foto. Bot akan meminta foto dan menawarkan pilihan peningkatan (tajamkan, kontras).
+-   `/convert_video`: Memulai alur kerja untuk mengonversi resolusi video. Bot akan meminta video dan menawarkan pilihan resolusi target (720p, 480p, 360p).
+-   `/cancel`: Membatalkan operasi saat ini (seperti pencarian atau unduhan).

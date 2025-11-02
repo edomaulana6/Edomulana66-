@@ -21,8 +21,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# States for the simplified one-step conversation
-GET_TITLE = 0
+# States for conversations
+GET_TITLE, GET_PHOTO, GET_ENHANCEMENT, GET_VIDEO, GET_RESOLUTION, GET_URL = range(6)
+
+# --- Feature Imports ---
+from image_enhancer import enhance_photo
+from video_converter import convert_video_resolution
 
 # --- Helper Functions ---
 
@@ -375,9 +379,178 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CallbackQueryHandler(download_button, pattern="^dl:"))
-    application.add_handler(MessageHandler(filters.Entity("url") | filters.Entity("text_link"), handle_url))
+    # application.add_handler(MessageHandler(filters.Entity("url") | filters.Entity("text_link"), handle_url)) # REMOVED to implement /download command
+
+    # --- URL Download Conversation ---
+    async def download_start(update: Update, context: CallbackContext) -> int:
+        """Starts the /download conversation."""
+        await update.message.reply_text("Silakan kirim URL yang ingin Anda unduh. Kirim /cancel untuk berhenti.")
+        return GET_URL
+
+    async def get_url_and_process(update: Update, context: CallbackContext) -> int:
+        """Receives a URL and passes it to the handler."""
+        await handle_url(update, context)
+        return ConversationHandler.END
+
+    download_conv = ConversationHandler(
+        entry_points=[CommandHandler("download", download_start)],
+        states={
+            GET_URL: [MessageHandler(filters.Entity("url") | filters.Entity("text_link"), get_url_and_process)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    application.add_handler(download_conv)
+
+    # --- Photo Enhancement Conversation ---
+    async def enhance_start(update: Update, context: CallbackContext) -> int:
+        """Starts the photo enhancement conversation."""
+        await update.message.reply_text("Silakan kirim foto yang ingin Anda tingkatkan. Kirim /cancel untuk berhenti.")
+        return GET_PHOTO
+
+    async def get_photo(update: Update, context: CallbackContext) -> int:
+        """Receives the photo and asks for the enhancement type."""
+        photo_file = await update.message.photo[-1].get_file()
+
+        # We need a unique path for each photo
+        download_dir = 'downloads'
+        os.makedirs(download_dir, exist_ok=True)
+        photo_path = os.path.join(download_dir, f"{uuid.uuid4()}.jpg")
+
+        await photo_file.download_to_drive(photo_path)
+        context.user_data['photo_path'] = photo_path
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Tajamkan", callback_data="enhance:sharpen")],
+            [InlineKeyboardButton("Kontras", callback_data="enhance:contrast")],
+        ])
+        await update.message.reply_text("Pilih jenis peningkatan:", reply_markup=keyboard)
+        return GET_ENHANCEMENT
+
+    async def apply_enhancement(update: Update, context: CallbackContext) -> int:
+        """Applies the selected enhancement and sends the photo back."""
+        query = update.callback_query
+        await query.answer()
+
+        enhancement_type = query.data.split(':')[1]
+        photo_path = context.user_data.get('photo_path')
+
+        if not photo_path or not os.path.exists(photo_path):
+            await query.edit_message_text("Maaf, file foto tidak ditemukan. Silakan mulai lagi.")
+            return ConversationHandler.END
+
+        await query.edit_message_text(f"Menerapkan peningkatan {enhancement_type}...")
+
+        enhanced_path = ""
+        try:
+            enhanced_path = enhance_photo(photo_path, enhancement_type)
+            await query.message.reply_photo(photo=open(enhanced_path, 'rb'))
+            await query.edit_message_text("Berikut adalah foto yang telah ditingkatkan:")
+        except Exception as e:
+            logger.error(f"Error during photo enhancement: {e}")
+            await query.edit_message_text("Maaf, terjadi kesalahan saat meningkatkan foto.")
+        finally:
+            # Clean up both original and enhanced files
+            if os.path.exists(photo_path):
+                os.remove(photo_path)
+            if enhanced_path and os.path.exists(enhanced_path):
+                os.remove(enhanced_path)
+
+            # Clear the path from user_data
+            if 'photo_path' in context.user_data:
+                del context.user_data['photo_path']
+
+        return ConversationHandler.END
+
+    enhance_conv = ConversationHandler(
+        entry_points=[CommandHandler("enhance_photo", enhance_start)],
+        states={
+            GET_PHOTO: [MessageHandler(filters.PHOTO, get_photo)],
+            GET_ENHANCEMENT: [CallbackQueryHandler(apply_enhancement, pattern="^enhance:")],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    application.add_handler(enhance_conv)
+
+    # --- Video Conversion Conversation ---
+    async def convert_start(update: Update, context: CallbackContext) -> int:
+        """Starts the video conversion conversation."""
+        await update.message.reply_text("Silakan kirim file video yang ingin Anda konversi. Kirim /cancel untuk berhenti.")
+        return GET_VIDEO
+
+    async def get_video(update: Update, context: CallbackContext) -> int:
+        """Receives the video and asks for the target resolution."""
+        # Note: This handles videos sent as 'video' or 'document'
+        video_file_obj = update.message.video or update.message.document
+        if not video_file_obj:
+            await update.message.reply_text("File tidak valid. Pastikan Anda mengirim video.")
+            return GET_VIDEO # Ask again
+
+        video_file = await video_file_obj.get_file()
+
+        download_dir = 'downloads'
+        os.makedirs(download_dir, exist_ok=True)
+        # Preserve original filename and extension
+        original_filename = video_file_obj.file_name
+        video_path = os.path.join(download_dir, f"{uuid.uuid4()}_{original_filename}")
+
+        await video_file.download_to_drive(video_path)
+        context.user_data['video_path'] = video_path
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("720p", callback_data="convert:720p")],
+            [InlineKeyboardButton("480p", callback_data="convert:480p")],
+            [InlineKeyboardButton("360p", callback_data="convert:360p")],
+        ])
+        await update.message.reply_text("Pilih resolusi target:", reply_markup=keyboard)
+        return GET_RESOLUTION
+
+    async def apply_conversion(update: Update, context: CallbackContext) -> int:
+        """Applies the selected resolution conversion."""
+        query = update.callback_query
+        await query.answer()
+
+        target_resolution = query.data.split(':')[1]
+        video_path = context.user_data.get('video_path')
+
+        if not video_path or not os.path.exists(video_path):
+            await query.edit_message_text("Maaf, file video tidak ditemukan. Silakan mulai lagi.")
+            return ConversationHandler.END
+
+        await query.edit_message_text(f"Mengonversi video ke {target_resolution}, ini mungkin memakan waktu...")
+
+        converted_path = ""
+        try:
+            converted_path = convert_video_resolution(video_path, target_resolution)
+            await query.message.reply_video(video=open(converted_path, 'rb'), caption=f"Video dikonversi ke {target_resolution}")
+            await query.delete_message() # Clean up the "Pilih resolusi" message
+        except Exception as e:
+            logger.error(f"Error during video conversion: {e}")
+            await query.edit_message_text("Maaf, terjadi kesalahan saat mengonversi video.")
+        finally:
+            # Clean up both original and converted files
+            if os.path.exists(video_path):
+                os.remove(video_path)
+            if converted_path and os.path.exists(converted_path):
+                os.remove(converted_path)
+
+            if 'video_path' in context.user_data:
+                del context.user_data['video_path']
+
+        return ConversationHandler.END
+
+    convert_conv = ConversationHandler(
+        entry_points=[CommandHandler("convert_video", convert_start)],
+        states={
+            GET_VIDEO: [MessageHandler(filters.VIDEO | filters.Document.VIDEO, get_video)],
+            GET_RESOLUTION: [CallbackQueryHandler(apply_conversion, pattern="^convert:")],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    application.add_handler(convert_conv)
+
 
     application.run_polling()
+
 
 if __name__ == "__main__":
     main()
