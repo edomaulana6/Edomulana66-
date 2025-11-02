@@ -225,6 +225,90 @@ async def download_file(identifier: str, format_choice: str, update: Update, con
         if os.path.exists(final_path): os.remove(final_path)
         if base_path and base_path != final_path and os.path.exists(base_path): os.remove(base_path)
 
+# --- Interactive Conversation Handlers (for features that need them) ---
+
+async def get_photo(update: Update, context: CallbackContext) -> int:
+    photo_file = await update.message.photo[-1].get_file()
+    download_dir = 'downloads'
+    os.makedirs(download_dir, exist_ok=True)
+    photo_path = os.path.join(download_dir, f"{uuid.uuid4()}.jpg")
+    await photo_file.download_to_drive(photo_path)
+    context.user_data['photo_path'] = photo_path
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Tajamkan", callback_data="enhance:sharpen")],
+        [InlineKeyboardButton("Kontras", callback_data="enhance:contrast")],
+    ])
+    await update.message.reply_text("Pilih jenis peningkatan:", reply_markup=keyboard)
+    return GET_ENHANCEMENT
+
+async def apply_enhancement(update: Update, context: CallbackContext) -> int:
+    query = update.callback_query
+    await query.answer()
+    enhancement_type = query.data.split(':')[1]
+    photo_path = context.user_data.get('photo_path')
+    if not photo_path or not os.path.exists(photo_path):
+        await query.edit_message_text("Maaf, file foto tidak ditemukan. Silakan mulai lagi.")
+        return ConversationHandler.END
+    await query.edit_message_text(f"Menerapkan peningkatan {enhancement_type}...")
+    enhanced_path = ""
+    try:
+        enhanced_path = enhance_photo(photo_path, enhancement_type)
+        with open(enhanced_path, 'rb') as photo_file:
+            await query.message.reply_photo(photo=photo_file)
+        await query.edit_message_text("Berikut adalah foto yang telah ditingkatkan:")
+    except Exception as e:
+        logger.error(f"Error during photo enhancement: {e}")
+        await query.edit_message_text("Maaf, terjadi kesalahan saat meningkatkan foto.")
+    finally:
+        if os.path.exists(photo_path): os.remove(photo_path)
+        if enhanced_path and os.path.exists(enhanced_path): os.remove(enhanced_path)
+        if 'photo_path' in context.user_data: del context.user_data['photo_path']
+    return ConversationHandler.END
+
+async def get_video(update: Update, context: CallbackContext) -> int:
+    video_file_obj = update.message.video or update.message.document
+    if not video_file_obj:
+        await update.message.reply_text("File tidak valid. Pastikan Anda mengirim video.")
+        return GET_VIDEO
+    video_file = await video_file_obj.get_file()
+    download_dir = 'downloads'
+    os.makedirs(download_dir, exist_ok=True)
+    original_filename = video_file_obj.file_name
+    video_path = os.path.join(download_dir, f"{uuid.uuid4()}_{original_filename}")
+    await video_file.download_to_drive(video_path)
+    context.user_data['video_path'] = video_path
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("4K", callback_data="convert:4k"), InlineKeyboardButton("2K", callback_data="convert:2k"), InlineKeyboardButton("1080p", callback_data="convert:1080p")],
+        [InlineKeyboardButton("720p", callback_data="convert:720p"), InlineKeyboardButton("480p", callback_data="convert:480p"), InlineKeyboardButton("360p", callback_data="convert:360p")],
+    ])
+    await update.message.reply_text("Pilih resolusi target:", reply_markup=keyboard)
+    return GET_RESOLUTION
+
+async def apply_conversion(update: Update, context: CallbackContext) -> int:
+    query = update.callback_query
+    await query.answer()
+    target_resolution = query.data.split(':')[1]
+    video_path = context.user_data.get('video_path')
+    if not video_path or not os.path.exists(video_path):
+        await query.edit_message_text("Maaf, file video tidak ditemukan. Silakan mulai lagi.")
+        return ConversationHandler.END
+    await query.edit_message_text(f"Mengonversi video ke {target_resolution}, ini mungkin memakan waktu...")
+    converted_path = ""
+    try:
+        converted_path = convert_video_resolution(video_path, target_resolution)
+        with open(converted_path, 'rb') as video_file:
+            await query.message.reply_video(video=video_file, caption=f"Video dikonversi ke {target_resolution}")
+        await query.delete_message()
+    except Exception as e:
+        logger.error(f"Error during video conversion: {e}")
+        await query.edit_message_text("Maaf, terjadi kesalahan saat mengonversi video.")
+    finally:
+        if os.path.exists(video_path): os.remove(video_path)
+        if converted_path and os.path.exists(converted_path): os.remove(converted_path)
+        if 'video_path' in context.user_data: del context.user_data['video_path']
+    return ConversationHandler.END
+
+
 def main() -> None:
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
@@ -289,89 +373,6 @@ def main() -> None:
         context.bot_data['user_ids'].add(update.effective_chat.id)
     application.add_handler(MessageHandler(filters.ALL, store_user_id), group=1)
 
-    # --- Interactive Conversation Handlers (for features that need them) ---
-
-    async def get_photo(update: Update, context: CallbackContext) -> int:
-        photo_file = await update.message.photo[-1].get_file()
-        download_dir = 'downloads'
-        os.makedirs(download_dir, exist_ok=True)
-        photo_path = os.path.join(download_dir, f"{uuid.uuid4()}.jpg")
-        await photo_file.download_to_drive(photo_path)
-        context.user_data['photo_path'] = photo_path
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Tajamkan", callback_data="enhance:sharpen")],
-            [InlineKeyboardButton("Kontras", callback_data="enhance:contrast")],
-        ])
-        await update.message.reply_text("Pilih jenis peningkatan:", reply_markup=keyboard)
-        return GET_ENHANCEMENT
-
-    async def apply_enhancement(update: Update, context: CallbackContext) -> int:
-        query = update.callback_query
-        await query.answer()
-        enhancement_type = query.data.split(':')[1]
-        photo_path = context.user_data.get('photo_path')
-        if not photo_path or not os.path.exists(photo_path):
-            await query.edit_message_text("Maaf, file foto tidak ditemukan. Silakan mulai lagi.")
-            return ConversationHandler.END
-        await query.edit_message_text(f"Menerapkan peningkatan {enhancement_type}...")
-        enhanced_path = ""
-        try:
-            enhanced_path = enhance_photo(photo_path, enhancement_type)
-            with open(enhanced_path, 'rb') as photo_file:
-                await query.message.reply_photo(photo=photo_file)
-            await query.edit_message_text("Berikut adalah foto yang telah ditingkatkan:")
-        except Exception as e:
-            logger.error(f"Error during photo enhancement: {e}")
-            await query.edit_message_text("Maaf, terjadi kesalahan saat meningkatkan foto.")
-        finally:
-            if os.path.exists(photo_path): os.remove(photo_path)
-            if enhanced_path and os.path.exists(enhanced_path): os.remove(enhanced_path)
-            if 'photo_path' in context.user_data: del context.user_data['photo_path']
-        return ConversationHandler.END
-
-    async def get_video(update: Update, context: CallbackContext) -> int:
-        video_file_obj = update.message.video or update.message.document
-        if not video_file_obj:
-            await update.message.reply_text("File tidak valid. Pastikan Anda mengirim video.")
-            return GET_VIDEO
-        video_file = await video_file_obj.get_file()
-        download_dir = 'downloads'
-        os.makedirs(download_dir, exist_ok=True)
-        original_filename = video_file_obj.file_name
-        video_path = os.path.join(download_dir, f"{uuid.uuid4()}_{original_filename}")
-        await video_file.download_to_drive(video_path)
-        context.user_data['video_path'] = video_path
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("4K", callback_data="convert:4k"), InlineKeyboardButton("2K", callback_data="convert:2k"), InlineKeyboardButton("1080p", callback_data="convert:1080p")],
-            [InlineKeyboardButton("720p", callback_data="convert:720p"), InlineKeyboardButton("480p", callback_data="convert:480p"), InlineKeyboardButton("360p", callback_data="convert:360p")],
-        ])
-        await update.message.reply_text("Pilih resolusi target:", reply_markup=keyboard)
-        return GET_RESOLUTION
-
-    async def apply_conversion(update: Update, context: CallbackContext) -> int:
-        query = update.callback_query
-        await query.answer()
-        target_resolution = query.data.split(':')[1]
-        video_path = context.user_data.get('video_path')
-        if not video_path or not os.path.exists(video_path):
-            await query.edit_message_text("Maaf, file video tidak ditemukan. Silakan mulai lagi.")
-            return ConversationHandler.END
-        await query.edit_message_text(f"Mengonversi video ke {target_resolution}, ini mungkin memakan waktu...")
-        converted_path = ""
-        try:
-            converted_path = convert_video_resolution(video_path, target_resolution)
-            with open(converted_path, 'rb') as video_file:
-                await query.message.reply_video(video=video_file, caption=f"Video dikonversi ke {target_resolution}")
-            await query.delete_message()
-        except Exception as e:
-            logger.error(f"Error during video conversion: {e}")
-            await query.edit_message_text("Maaf, terjadi kesalahan saat mengonversi video.")
-        finally:
-            if os.path.exists(video_path): os.remove(video_path)
-            if converted_path and os.path.exists(converted_path): os.remove(converted_path)
-            if 'video_path' in context.user_data: del context.user_data['video_path']
-        return ConversationHandler.END
-
     enhance_conv = ConversationHandler(
         entry_points=[CommandHandler("enhance_photo", lambda u, c: u.message.reply_text("Kirim foto untuk ditingkatkan.") or GET_PHOTO)],
         states={
@@ -394,6 +395,3 @@ def main() -> None:
     application.add_handler(convert_conv)
 
     application.run_polling()
-
-if __name__ == "__main__":
-    main()
