@@ -395,8 +395,13 @@ def main() -> None:
         await perform_search(query, update, context)
         return AWAIT_DOWNLOAD_CHOICE
 
-    async def download_choice_and_end(update: Update, context: CallbackContext) -> int:
-        """Handles the download button press and ends the conversation."""
+    async def search_download_choice_and_end(update: Update, context: CallbackContext) -> int:
+        """Handles the download button press for the SEARCH conversation and ends it."""
+        await download_button(update, context)
+        return ConversationHandler.END
+
+    async def url_download_choice_and_end(update: Update, context: CallbackContext) -> int:
+        """Handles the download button press for the DOWNLOAD conversation and ends it."""
         await download_button(update, context)
         return ConversationHandler.END
 
@@ -404,7 +409,7 @@ def main() -> None:
         entry_points=[CommandHandler("search", search_start)],
         states={
             GET_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_and_await_choice)],
-            AWAIT_DOWNLOAD_CHOICE: [CallbackQueryHandler(download_choice_and_end, pattern="^dl:")],
+            AWAIT_DOWNLOAD_CHOICE: [CallbackQueryHandler(search_download_choice_and_end, pattern="^dl:")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         conversation_timeout=600  # 10 minutes to choose a download
@@ -449,7 +454,7 @@ def main() -> None:
         entry_points=[CommandHandler("download", download_start)],
         states={
             GET_URL: [MessageHandler(filters.Entity("url") | filters.Entity("text_link"), get_url_and_process)],
-            AWAIT_DOWNLOAD_CHOICE: [CallbackQueryHandler(download_choice_and_end, pattern="^dl:")],
+            AWAIT_DOWNLOAD_CHOICE: [CallbackQueryHandler(url_download_choice_and_end, pattern="^dl:")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         conversation_timeout=600  # 10 minutes to choose a download
