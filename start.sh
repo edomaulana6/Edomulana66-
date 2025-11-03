@@ -15,7 +15,10 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 
 # 2. Muat variabel dari .env dan periksa token
-export $(grep -v '^#' $ENV_FILE | xargs)
+set -a
+source "$ENV_FILE"
+set +a
+
 if [ -z "$TELEGRAM_TOKEN" ] || [ "$TELEGRAM_TOKEN" == "GANTI_DENGAN_TOKEN_ANDA" ]; then
     echo "Kesalahan: TELEGRAM_TOKEN belum diatur di dalam file '$ENV_FILE'."
     exit 1
