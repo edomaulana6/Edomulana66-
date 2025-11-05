@@ -10,12 +10,20 @@ Bot Telegram serbaguna yang dirancang untuk berjalan di Termux, mampu mengunduh 
 -   **Indikator Memuat**: Umpan balik visual dengan stiker animasi selama proses unduhan.
 -   **Instalasi Mudah**: Skrip penyiapan interaktif untuk konfigurasi token yang mudah.
 -   **Notifikasi Status**: Menerima siaran saat bot online atau offline.
+-   **Mode 24/7 di Termux**: Terintegrasi dengan `termux-wake-lock` untuk mencegah bot dimatikan oleh sistem Android.
 
 ## Prasyarat
 
 -   **Python**: `pkg install python`
 -   **FFmpeg**: `pkg install ffmpeg`
 -   **Git**: `pkg install git`
+-   **Termux API (untuk mode 24/7)**: `pkg install termux-api`
+
+## Menjalankan di Termux (Mode 24/7)
+
+Bot ini dirancang untuk berjalan terus-menerus di Termux. Skrip `start.sh` secara otomatis menggunakan `termux-wake-lock` untuk mencegah Android mematikan bot untuk menghemat baterai. Demikian pula, `stop.sh` akan melepaskan kunci tersebut.
+
+Pastikan aplikasi Termux:API sudah terinstal dari F-Droid dan Anda telah menjalankan `pkg install termux-api` agar fitur ini berfungsi.
 
 ## Penyiapan Cepat
 

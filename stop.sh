@@ -28,3 +28,7 @@ fi
 rm -f $PID_FILE
 
 echo "Pembersihan selesai. File log tetap ada di $LOG_FILE."
+
+# Selalu coba lepaskan wake lock untuk memastikan kebersihan
+echo "Melepaskan Termux wake lock..."
+termux-wake-unlock
