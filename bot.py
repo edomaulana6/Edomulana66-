@@ -23,8 +23,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# States for the remaining conversations
-GET_PHOTO, GET_ENHANCEMENT, GET_VIDEO, GET_RESOLUTION = range(4)
+# States for conversations
+(
+    GET_SONG_TITLE,
+    GET_PHOTO,
+    GET_ENHANCEMENT,
+    GET_VIDEO,
+    GET_RESOLUTION,
+) = range(5)
 
 # --- Feature Imports ---
 from image_enhancer import enhance_photo
@@ -133,7 +139,7 @@ async def help_command(update: Update, context: CallbackContext) -> None:
     await update.message.reply_markdown(
         "*Bantuan Perintah*\n\n"
         "`/search <query>` - Mencari video/musik.\n"
-        "`/song <query>` - Langsung mengunduh lagu teratas.\n"
+        "`/song` - Mengunduh lagu (interaktif).\n"
         "`/download <url>` - Mengunduh media dari sebuah URL.\n"
         "`/enhance_photo` - Meningkatkan kualitas sebuah foto (interaktif).\n"
         "`/convert_video` - Mengubah resolusi sebuah video (interaktif).\n"
@@ -244,10 +250,16 @@ async def download_file(identifier: str, format_choice: str, update: Update, con
         with open(final_path, 'rb') as file_to_send:
             file_extension = 'mp3' if format_choice == 'audio' else info_dict.get('ext', 'mp4')
             filename = f"{sanitized_title}.{file_extension}"
+            logger.info(f"Mengirim file: {filename} (Ukuran: {os.path.getsize(final_path)} bytes)")
             await sender(file_to_send, caption=caption_text, title=caption_text, filename=filename, thumbnail=thumbnail_data)
+            logger.info("Pengiriman file berhasil.")
     finally:
-        if os.path.exists(final_path): os.remove(final_path)
-        if base_path and base_path != final_path and os.path.exists(base_path): os.remove(base_path)
+        if os.path.exists(final_path):
+            logger.info(f"Menghapus file sementara: {final_path}")
+            os.remove(final_path)
+        if base_path and base_path != final_path and os.path.exists(base_path):
+            logger.info(f"Menghapus file sementara: {base_path}")
+            os.remove(base_path)
 
 # --- Interactive Conversation Handlers (for features that need them) ---
 
@@ -423,7 +435,6 @@ def main() -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("search", search_command))
     application.add_handler(CommandHandler("download", download_command))
-    application.add_handler(CommandHandler("song", song_command))
 
     # --- Specific Callback Handlers ---
     application.add_handler(CallbackQueryHandler(handle_search_download, pattern="^dl_search:"))
@@ -436,8 +447,37 @@ def main() -> None:
         context.bot_data['user_ids'].add(update.effective_chat.id)
     application.add_handler(MessageHandler(filters.ALL, store_user_id), group=1)
 
+    async def enhance_photo_start(update: Update, context: CallbackContext) -> int:
+        """Starts the photo enhancement conversation."""
+        await update.message.reply_text("Silakan kirim foto yang ingin Anda tingkatkan kualitasnya.")
+        return GET_PHOTO
+
+    async def convert_video_start(update: Update, context: CallbackContext) -> int:
+        """Starts the video conversion conversation."""
+        await update.message.reply_text("Silakan kirim video yang ingin Anda ubah resolusinya.")
+        return GET_VIDEO
+
+    async def song_start(update: Update, context: CallbackContext) -> int:
+        """Starts the song download conversation."""
+        await update.message.reply_text("Silakan kirimkan judul lagu yang ingin Anda cari dan unduh.")
+        return GET_SONG_TITLE
+
+    async def song_get_title(update: Update, context: CallbackContext) -> int:
+        """Receives the song title and starts the download."""
+        query = update.message.text
+        await perform_song_download(query, update, context)
+        return ConversationHandler.END
+
+    song_conv = ConversationHandler(
+        entry_points=[CommandHandler("song", song_start)],
+        states={
+            GET_SONG_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, song_get_title)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
     enhance_conv = ConversationHandler(
-        entry_points=[CommandHandler("enhance_photo", lambda u, c: u.message.reply_text("Kirim foto untuk ditingkatkan.") or GET_PHOTO)],
+        entry_points=[CommandHandler("enhance_photo", enhance_photo_start)],
         states={
             GET_PHOTO: [MessageHandler(filters.PHOTO, get_photo)],
             GET_ENHANCEMENT: [CallbackQueryHandler(apply_enhancement, pattern="^enhance:")],
@@ -446,7 +486,7 @@ def main() -> None:
     )
 
     convert_conv = ConversationHandler(
-        entry_points=[CommandHandler("convert_video", lambda u, c: u.message.reply_text("Kirim video untuk dikonversi.") or GET_VIDEO)],
+        entry_points=[CommandHandler("convert_video", convert_video_start)],
         states={
             GET_VIDEO: [MessageHandler(filters.VIDEO | filters.Document.VIDEO, get_video)],
             GET_RESOLUTION: [CallbackQueryHandler(apply_conversion, pattern="^convert:")],
@@ -454,6 +494,7 @@ def main() -> None:
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
+    application.add_handler(song_conv)
     application.add_handler(enhance_conv)
     application.add_handler(convert_conv)
 
