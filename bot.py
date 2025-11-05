@@ -14,6 +14,8 @@ from telegram.ext import (
     PicklePersistence,
 )
 import yt_dlp
+import shutil
+import sys
 
 # Enable logging
 logging.basicConfig(
@@ -331,15 +333,49 @@ async def apply_conversion(update: Update, context: CallbackContext) -> int:
     return ConversationHandler.END
 
 
-def main() -> None:
+def jalankan_pemeriksaan_awal() -> bool:
+    """
+    Menjalankan serangkaian pemeriksaan untuk memastikan bot dapat berjalan.
+    Memverifikasi token dan dependensi sistem seperti ffmpeg.
+    """
+    print("--- 🩺 Memulai Pemeriksaan Awal Sistem Bot 🩺 ---")
+
+    # 1. Verifikasi Token Telegram
     token = os.getenv("TELEGRAM_TOKEN")
     if not token or token == "GANTI_DENGAN_TOKEN_ANDA" or token == "":
-        logger.error("--- KESALAHAN KONFIGURASI ---")
-        logger.error("Token Telegram tidak valid atau belum diatur.")
-        logger.error("Silakan buka file '.env' dan ganti 'GANTI_DENGAN_TOKEN_ANDA' dengan token bot Anda yang sebenarnya.")
-        logger.error("Jika file .env belum ada, jalankan 'python3 setup.py'.")
-        return
+        logger.error("="*50)
+        logger.error(" [❌] PEMERIKSAAN GAGAL: TOKEN TELEGRAM TIDAK VALID")
+        logger.error("="*50)
+        logger.error(" Token Anda belum diatur atau masih menggunakan placeholder.")
+        logger.error(" Silakan perbaiki file '.env' Anda.")
+        logger.error(" Jika file .env tidak ada, jalankan 'python3 setup.py' terlebih dahulu.")
+        logger.error("="*50)
+        return False
+    print("[✅] Pemeriksaan Token: Lolos")
 
+    # 2. Verifikasi FFmpeg
+    if not shutil.which("ffmpeg"):
+        logger.error("="*50)
+        logger.error(" [❌] PEMERIKSAAN GAGAL: FFMPEG TIDAK DITEMUKAN")
+        logger.error("="*50)
+        logger.error(" 'ffmpeg' adalah program sistem yang wajib ada untuk fitur audio dan video.")
+        logger.error(" Bot tidak dapat berjalan tanpanya.")
+        logger.error(" Untuk menginstalnya di Termux, jalankan perintah:")
+        logger.error("   pkg install ffmpeg")
+        logger.error("="*50)
+        return False
+    print("[✅] Pemeriksaan FFmpeg: Lolos")
+
+    print("\n[🎉] Semua pemeriksaan awal berhasil! Bot siap dijalankan.")
+    print("="*50)
+    return True
+
+
+def main() -> None:
+    if not jalankan_pemeriksaan_awal():
+        sys.exit(1) # Hentikan bot jika pemeriksaan gagal
+
+    token = os.getenv("TELEGRAM_TOKEN")
     persistence = PicklePersistence(filepath="bot_persistence")
 
     async def send_online_message(application: Application) -> None:
