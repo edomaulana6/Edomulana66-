@@ -175,15 +175,18 @@ async def handle_search_download(update: Update, context: CallbackContext) -> No
     """Handles download callbacks from search results (using video ID)."""
     query = update.callback_query
     await query.answer()
+    logger.info(f"Menerima callback pencarian: {query.data}")
     try:
         _, format_choice, video_id = query.data.split(':', 2)
     except ValueError:
+        logger.error(f"Callback pencarian tidak valid: {query.data}")
         await query.edit_message_text("❌ Terjadi kesalahan: Callback pencarian tidak valid.")
         return
 
     await query.edit_message_reply_markup(reply_markup=None)
     sticker_message = await query.message.reply_sticker("CAACAgIAAxkBAAIEv2X0x4-v2-5v3e_wY_v2-5v3e_wYAAJ-BwAC-5-xS_v2-5v3e_wYHgQ")
     try:
+        logger.info(f"Memulai unduhan dari pencarian untuk video ID: {video_id}, format: {format_choice}")
         await download_file(video_id, format_choice, update, context)
     except Exception as e:
         logger.error(f"Error during download_file call from search: {e}")
@@ -195,14 +198,17 @@ async def handle_url_download(update: Update, context: CallbackContext) -> None:
     """Handles download callbacks from a submitted URL (using a UUID key)."""
     query = update.callback_query
     await query.answer()
+    logger.info(f"Menerima callback URL: {query.data}")
     try:
         _, format_choice, url_key = query.data.split(':', 2)
     except ValueError:
+        logger.error(f"Callback URL tidak valid: {query.data}")
         await query.edit_message_text("❌ Terjadi kesalahan: Callback URL tidak valid.")
         return
 
     url = context.user_data.get(url_key)
     if not url:
+        logger.error(f"URL key tidak ditemukan di user_data: {url_key}")
         await query.message.reply_text("❌ Link unduhan sudah kedaluwarsa. Silakan kirim ulang URL.")
         await query.edit_message_reply_markup(reply_markup=None)
         return
@@ -210,6 +216,7 @@ async def handle_url_download(update: Update, context: CallbackContext) -> None:
     await query.edit_message_reply_markup(reply_markup=None)
     sticker_message = await query.message.reply_sticker("CAACAgIAAxkBAAIEv2X0x4-v2-5v3e_wY_v2-5v3e_wYAAJ-BwAC-5-xS_v2-5v3e_wYHgQ")
     try:
+        logger.info(f"Memulai unduhan dari URL untuk key: {url_key}, format: {format_choice}")
         await download_file(url, format_choice, update, context)
     except Exception as e:
         logger.error(f"Error during download_file call from URL: {e}")
@@ -304,16 +311,23 @@ async def apply_enhancement(update: Update, context: CallbackContext) -> int:
     return ConversationHandler.END
 
 async def get_video(update: Update, context: CallbackContext) -> int:
+    logger.info("Memasuki state get_video.")
     video_file_obj = update.message.video or update.message.document
     if not video_file_obj:
+        logger.warning("Pesan diterima di state get_video, tetapi bukan file video.")
         await update.message.reply_text("File tidak valid. Pastikan Anda mengirim video.")
         return GET_VIDEO
+
+    logger.info(f"Menerima file video: {video_file_obj.file_name} (ID: {video_file_obj.file_id})")
     video_file = await video_file_obj.get_file()
     download_dir = 'downloads'
     os.makedirs(download_dir, exist_ok=True)
     original_filename = video_file_obj.file_name
     video_path = os.path.join(download_dir, f"{uuid.uuid4()}_{original_filename}")
+
+    logger.info(f"Mengunduh video ke {video_path}...")
     await video_file.download_to_drive(video_path)
+    logger.info("Video berhasil diunduh.")
     context.user_data['video_path'] = video_path
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("4K", callback_data="convert:4k"), InlineKeyboardButton("2K", callback_data="convert:2k"), InlineKeyboardButton("1080p", callback_data="convert:1080p")],
@@ -323,27 +337,37 @@ async def get_video(update: Update, context: CallbackContext) -> int:
     return GET_RESOLUTION
 
 async def apply_conversion(update: Update, context: CallbackContext) -> int:
+    logger.info("Memasuki state apply_conversion.")
     query = update.callback_query
     await query.answer()
     target_resolution = query.data.split(':')[1]
     video_path = context.user_data.get('video_path')
+
     if not video_path or not os.path.exists(video_path):
+        logger.error("Path video tidak ditemukan di user_data saat mencoba konversi.")
         await query.edit_message_text("Maaf, file video tidak ditemukan. Silakan mulai lagi.")
         return ConversationHandler.END
+
+    logger.info(f"Memulai konversi untuk {video_path} ke resolusi {target_resolution}.")
     await query.edit_message_text(f"Mengonversi video ke {target_resolution}, ini mungkin memakan waktu...")
     converted_path = ""
     try:
         converted_path = convert_video_resolution(video_path, target_resolution)
+        logger.info(f"Konversi berhasil, file baru di: {converted_path}")
         with open(converted_path, 'rb') as video_file:
             await query.message.reply_video(video=video_file, caption=f"Video dikonversi ke {target_resolution}")
         await query.delete_message()
     except Exception as e:
-        logger.error(f"Error during video conversion: {e}")
+        logger.error(f"Terjadi error saat menjalankan convert_video_resolution: {e}", exc_info=True)
         await query.edit_message_text("Maaf, terjadi kesalahan saat mengonversi video.")
     finally:
-        if os.path.exists(video_path): os.remove(video_path)
-        if converted_path and os.path.exists(converted_path): os.remove(converted_path)
-        if 'video_path' in context.user_data: del context.user_data['video_path']
+        logger.info("Membersihkan file video sementara.")
+        if os.path.exists(video_path):
+            os.remove(video_path)
+        if converted_path and os.path.exists(converted_path):
+            os.remove(converted_path)
+        if 'video_path' in context.user_data:
+            del context.user_data['video_path']
     return ConversationHandler.END
 
 
@@ -409,30 +433,6 @@ def main() -> None:
     application = Application.builder().token(token).persistence(persistence).post_init(send_online_message).post_shutdown(send_offline_message).build()
 
     # --- Direct Command Handlers (No Conversation) ---
-    async def search_command(update: Update, context: CallbackContext) -> None:
-        query = " ".join(context.args)
-        if not query:
-            await update.message.reply_text("Gunakan: `/search <query>`")
-            return
-        await perform_search(query, update, context)
-
-    async def download_command(update: Update, context: CallbackContext) -> None:
-        if not context.args:
-            await update.message.reply_text("Gunakan: `/download <url>`")
-            return
-        url = context.args[0]
-        if not re.match(r'https?://\S+', url):
-            await update.message.reply_text("URL tidak valid.")
-            return
-        await handle_url(url, update, context)
-
-    async def song_command(update: Update, context: CallbackContext) -> None:
-        query = " ".join(context.args)
-        if not query:
-            await update.message.reply_text("Gunakan: `/song <query>`")
-            return
-        await perform_song_download(query, update, context)
-
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
 
@@ -454,6 +454,7 @@ def main() -> None:
 
     async def convert_video_start(update: Update, context: CallbackContext) -> int:
         """Starts the video conversion conversation."""
+        logger.info("Memasuki state convert_video_start.")
         await update.message.reply_text("Silakan kirim video yang ingin Anda ubah resolusinya.")
         return GET_VIDEO
 
