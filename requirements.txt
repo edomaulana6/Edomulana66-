@@ -9,3 +9,6 @@ yt-dlp @ git+https://github.com/yt-dlp/yt-dlp.git
 
 # Untuk pemrosesan gambar
 Pillow==10.1.0
+
+# Untuk memuat file .env
+python-dotenv==1.0.0
