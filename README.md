@@ -31,10 +31,10 @@ Bot Telegram serbaguna yang dirancang untuk berjalan di Termux, mampu mengunduh 
 ## Daftar Perintah
 
 -   `/start`: Memulai interaksi dengan bot.
--   `/help`: Menampilkan pesan bantuan ini.
--   `/search <query>`: Mencari video/musik berdasarkan kueri yang diberikan.
+-   `/help`: Menampilkan daftar lengkap perintah.
+-   `/search`: Memulai alur interaktif untuk mencari video/musik.
 -   `/song`: Memulai alur interaktif untuk mengunduh sebuah lagu.
--   `/download <url>`: Mengunduh media dari URL yang diberikan.
+-   `/download`: Memulai alur interaktif untuk mengunduh dari URL.
 -   `/enhance_photo`: Memulai alur interaktif untuk meningkatkan kualitas foto.
 -   `/convert_video`: Memulai alur interaktif untuk mengubah resolusi video.
--   `/cancel`: Membatalkan operasi interaktif yang sedang berjalan.
+-   `/cancel`: Membatalkan operasi yang sedang berjalan.

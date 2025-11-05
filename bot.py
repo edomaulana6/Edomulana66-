@@ -25,12 +25,14 @@ logger = logging.getLogger(__name__)
 
 # States for conversations
 (
+    GET_DOWNLOAD_URL,
+    GET_SEARCH_QUERY,
     GET_SONG_TITLE,
     GET_PHOTO,
     GET_ENHANCEMENT,
     GET_VIDEO,
     GET_RESOLUTION,
-) = range(5)
+) = range(7)
 
 # --- Feature Imports ---
 from image_enhancer import enhance_photo
@@ -137,13 +139,13 @@ async def start(update: Update, context: CallbackContext) -> None:
 
 async def help_command(update: Update, context: CallbackContext) -> None:
     await update.message.reply_markdown(
-        "*Bantuan Perintah*\n\n"
-        "`/search <query>` - Mencari video/musik.\n"
-        "`/song` - Mengunduh lagu (interaktif).\n"
-        "`/download <url>` - Mengunduh media dari sebuah URL.\n"
-        "`/enhance_photo` - Meningkatkan kualitas sebuah foto (interaktif).\n"
-        "`/convert_video` - Mengubah resolusi sebuah video (interaktif).\n"
-        "`/cancel` - Membatalkan operasi interaktif."
+        "*Bantuan Perintah (Semua Interaktif)*\n\n"
+        "`/search` - Mencari video/musik.\n"
+        "`/song` - Mengunduh sebuah lagu.\n"
+        "`/download` - Mengunduh media dari sebuah URL.\n"
+        "`/enhance_photo` - Meningkatkan kualitas foto.\n"
+        "`/convert_video` - Mengubah resolusi video.\n"
+        "`/cancel` - Membatalkan operasi yang sedang berjalan."
     )
 
 # --- Download and URL handling ---
@@ -433,8 +435,6 @@ def main() -> None:
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("search", search_command))
-    application.add_handler(CommandHandler("download", download_command))
 
     # --- Specific Callback Handlers ---
     application.add_handler(CallbackQueryHandler(handle_search_download, pattern="^dl_search:"))
@@ -494,6 +494,49 @@ def main() -> None:
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
+    async def search_start(update: Update, context: CallbackContext) -> int:
+        """Starts the search conversation."""
+        await update.message.reply_text("Apa yang ingin Anda cari?")
+        return GET_SEARCH_QUERY
+
+    async def search_get_query(update: Update, context: CallbackContext) -> int:
+        """Receives the search query and performs the search."""
+        query = update.message.text
+        await perform_search(query, update, context)
+        return ConversationHandler.END
+
+    search_conv = ConversationHandler(
+        entry_points=[CommandHandler("search", search_start)],
+        states={
+            GET_SEARCH_QUERY: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_get_query)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    async def download_start(update: Update, context: CallbackContext) -> int:
+        """Starts the download conversation."""
+        await update.message.reply_text("Silakan kirimkan URL yang ingin Anda unduh.")
+        return GET_DOWNLOAD_URL
+
+    async def download_get_url(update: Update, context: CallbackContext) -> int:
+        """Receives the URL and starts the download process."""
+        url = update.message.text
+        if not re.match(r'https?://\S+', url):
+            await update.message.reply_text("URL tidak valid. Silakan kirimkan URL yang benar.")
+            return GET_DOWNLOAD_URL
+        await handle_url(url, update, context)
+        return ConversationHandler.END
+
+    download_conv = ConversationHandler(
+        entry_points=[CommandHandler("download", download_start)],
+        states={
+            GET_DOWNLOAD_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, download_get_url)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    application.add_handler(download_conv)
+    application.add_handler(search_conv)
     application.add_handler(song_conv)
     application.add_handler(enhance_conv)
     application.add_handler(convert_conv)
