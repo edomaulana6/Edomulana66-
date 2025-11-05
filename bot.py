@@ -1,5 +1,9 @@
 import logging
 import os
+from dotenv import load_dotenv
+
+# Muat variabel lingkungan dari file .env
+load_dotenv()
 import re
 import uuid
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -175,75 +179,95 @@ async def handle_search_download(update: Update, context: CallbackContext) -> No
     """Handles download callbacks from search results (using video ID)."""
     query = update.callback_query
     await query.answer()
-    logger.info(f"Menerima callback pencarian: {query.data}")
+    logger.info(f"-> SEARCH_DL: Received search callback: {query.data}")
     try:
         _, format_choice, video_id = query.data.split(':', 2)
     except ValueError:
-        logger.error(f"Callback pencarian tidak valid: {query.data}")
+        logger.error(f"-> SEARCH_DL: Invalid search callback format: {query.data}")
         await query.edit_message_text("❌ Terjadi kesalahan: Callback pencarian tidak valid.")
         return
 
+    logger.info(f"-> SEARCH_DL: Parsed callback. Format: {format_choice}, Video ID: {video_id}")
     await query.edit_message_reply_markup(reply_markup=None)
+    logger.info("-> SEARCH_DL: Removed inline keyboard.")
     sticker_message = await query.message.reply_sticker("CAACAgIAAxkBAAIEv2X0x4-v2-5v3e_wY_v2-5v3e_wYAAJ-BwAC-5-xS_v2-5v3e_wYHgQ")
     try:
-        logger.info(f"Memulai unduhan dari pencarian untuk video ID: {video_id}, format: {format_choice}")
+        logger.info(f"-> SEARCH_DL: Calling download_file for Video ID: {video_id}")
         await download_file(video_id, format_choice, update, context)
+        logger.info("-> SEARCH_DL: download_file completed successfully.")
     except Exception as e:
-        logger.error(f"Error during download_file call from search: {e}")
+        logger.error(f"-> SEARCH_DL: Error during download_file call from search: {e}", exc_info=True)
         await query.message.reply_text("❌ Gagal mengunduh file dari hasil pencarian.")
     finally:
-        if sticker_message: await sticker_message.delete()
+        if sticker_message:
+            await sticker_message.delete()
+            logger.info("-> SEARCH_DL: Deleted sticker message.")
 
 async def handle_url_download(update: Update, context: CallbackContext) -> None:
     """Handles download callbacks from a submitted URL (using a UUID key)."""
     query = update.callback_query
     await query.answer()
-    logger.info(f"Menerima callback URL: {query.data}")
+    logger.info(f"-> URL_DL: Received URL callback: {query.data}")
     try:
         _, format_choice, url_key = query.data.split(':', 2)
     except ValueError:
-        logger.error(f"Callback URL tidak valid: {query.data}")
+        logger.error(f"-> URL_DL: Invalid URL callback format: {query.data}")
         await query.edit_message_text("❌ Terjadi kesalahan: Callback URL tidak valid.")
         return
 
+    logger.info(f"-> URL_DL: Parsed callback. Format: {format_choice}, URL Key: {url_key}")
     url = context.user_data.get(url_key)
     if not url:
-        logger.error(f"URL key tidak ditemukan di user_data: {url_key}")
+        logger.error(f"-> URL_DL: URL key not found in user_data: {url_key}")
         await query.message.reply_text("❌ Link unduhan sudah kedaluwarsa. Silakan kirim ulang URL.")
         await query.edit_message_reply_markup(reply_markup=None)
         return
 
+    logger.info(f"-> URL_DL: Retrieved URL '{url}' from user_data.")
     await query.edit_message_reply_markup(reply_markup=None)
+    logger.info("-> URL_DL: Removed inline keyboard.")
     sticker_message = await query.message.reply_sticker("CAACAgIAAxkBAAIEv2X0x4-v2-5v3e_wY_v2-5v3e_wYAAJ-BwAC-5-xS_v2-5v3e_wYHgQ")
     try:
-        logger.info(f"Memulai unduhan dari URL untuk key: {url_key}, format: {format_choice}")
+        logger.info(f"-> URL_DL: Calling download_file for URL key: {url_key}")
         await download_file(url, format_choice, update, context)
+        logger.info("-> URL_DL: download_file completed successfully.")
     except Exception as e:
-        logger.error(f"Error during download_file call from URL: {e}")
+        logger.error(f"-> URL_DL: Error during download_file call from URL: {e}", exc_info=True)
         await query.message.reply_text("❌ Gagal mengunduh file dari URL.")
     finally:
-        if sticker_message: await sticker_message.delete()
+        if sticker_message:
+            await sticker_message.delete()
+            logger.info("-> URL_DL: Deleted sticker message.")
 
 async def download_file(identifier: str, format_choice: str, update: Update, context: CallbackContext):
+    logger.info(f"-> DOWNLOAD_FILE: Starting process for identifier: {identifier}, format: {format_choice}")
     url = identifier if re.match(r'https?://', identifier) else f"https://www.youtube.com/watch?v={identifier}"
     download_dir = 'downloads'
     os.makedirs(download_dir, exist_ok=True)
     file_path_template = os.path.join(download_dir, '%(id)s.%(ext)s')
-    ydl_opts = {'outtmpl': file_path_template, 'noplaylist': True, 'quiet': True}
+    ydl_opts = {'outtmpl': file_path_template, 'noplaylist': True, 'quiet': True, 'noprogress': True}
     if format_choice == 'audio':
+        logger.info("-> DOWNLOAD_FILE: Configuring for audio download (MP3).")
         ydl_opts['format'] = 'bestaudio/best'
         ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
     else:
+        logger.info("-> DOWNLOAD_FILE: Configuring for video download.")
         ydl_opts['format'] = 'best'
     final_path, base_path = "", ""
     try:
+        logger.info(f"-> DOWNLOAD_FILE: Invoking yt-dlp for URL: {url}")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info_dict = ydl.extract_info(url, download=True)
             base_path = ydl.prepare_filename(info_dict)
+        logger.info(f"-> DOWNLOAD_FILE: yt-dlp finished. Base file path: {base_path}")
         final_path = os.path.splitext(base_path)[0] + '.mp3' if format_choice == 'audio' else base_path
         if not os.path.exists(final_path):
-            if os.path.exists(base_path): final_path = base_path
-            else: raise FileNotFoundError(f"File tidak ditemukan: {final_path} atau {base_path}")
+            logger.warning(f"-> DOWNLOAD_FILE: Final path {final_path} not found. Checking base path {base_path}.")
+            if os.path.exists(base_path):
+                final_path = base_path
+            else:
+                raise FileNotFoundError(f"File tidak ditemukan setelah unduhan: {final_path} atau {base_path}")
+        logger.info(f"-> DOWNLOAD_FILE: Final file path determined: {final_path}")
         effective_update = update.callback_query or update.message
         caption_text = info_dict.get('title', 'File')
         sanitized_title = re.sub(r'[\\/*?:"<>|]', "", caption_text)
@@ -251,23 +275,30 @@ async def download_file(identifier: str, format_choice: str, update: Update, con
         if format_choice == 'audio' and (thumbnail_url := info_dict.get('thumbnail')):
             import requests
             try:
+                logger.info(f"-> DOWNLOAD_FILE: Downloading thumbnail from {thumbnail_url}")
                 response = requests.get(thumbnail_url)
                 response.raise_for_status()
                 thumbnail_data = response.content
-            except requests.RequestException as e: logger.warning(f"Gagal mengunduh thumbnail: {e}")
+            except requests.RequestException as e:
+                logger.warning(f"-> DOWNLOAD_FILE: Gagal mengunduh thumbnail: {e}")
         sender = effective_update.message.reply_audio if format_choice == 'audio' else effective_update.message.reply_video
         with open(final_path, 'rb') as file_to_send:
             file_extension = 'mp3' if format_choice == 'audio' else info_dict.get('ext', 'mp4')
             filename = f"{sanitized_title}.{file_extension}"
-            logger.info(f"Mengirim file: {filename} (Ukuran: {os.path.getsize(final_path)} bytes)")
+            logger.info(f"-> DOWNLOAD_FILE: Sending file '{filename}' (Size: {os.path.getsize(final_path)} bytes) via Telegram API.")
             await sender(file_to_send, caption=caption_text, title=caption_text, filename=filename, thumbnail=thumbnail_data)
-            logger.info("Pengiriman file berhasil.")
+            logger.info("-> DOWNLOAD_FILE: Telegram API call completed.")
+    except Exception as e:
+        logger.error(f"-> DOWNLOAD_FILE: An exception occurred: {e}", exc_info=True)
+        # Re-raise to be caught by the calling handler, which will notify the user.
+        raise
     finally:
+        logger.info("-> DOWNLOAD_FILE: Entering cleanup phase.")
         if os.path.exists(final_path):
-            logger.info(f"Menghapus file sementara: {final_path}")
+            logger.info(f"-> DOWNLOAD_FILE: Deleting final file: {final_path}")
             os.remove(final_path)
         if base_path and base_path != final_path and os.path.exists(base_path):
-            logger.info(f"Menghapus file sementara: {base_path}")
+            logger.info(f"-> DOWNLOAD_FILE: Deleting base file: {base_path}")
             os.remove(base_path)
 
 # --- Interactive Conversation Handlers (for features that need them) ---
@@ -311,63 +342,70 @@ async def apply_enhancement(update: Update, context: CallbackContext) -> int:
     return ConversationHandler.END
 
 async def get_video(update: Update, context: CallbackContext) -> int:
-    logger.info("Memasuki state get_video.")
+    logger.info("-> CONVERT_VIDEO: Entering get_video state.")
     video_file_obj = update.message.video or update.message.document
     if not video_file_obj:
-        logger.warning("Pesan diterima di state get_video, tetapi bukan file video.")
+        logger.warning("-> CONVERT_VIDEO: Message received in get_video state, but it's not a video or document. Rejecting.")
         await update.message.reply_text("File tidak valid. Pastikan Anda mengirim video.")
         return GET_VIDEO
 
-    logger.info(f"Menerima file video: {video_file_obj.file_name} (ID: {video_file_obj.file_id})")
+    logger.info(f"-> CONVERT_VIDEO: Video object received: {video_file_obj.file_name} (ID: {video_file_obj.file_id})")
     video_file = await video_file_obj.get_file()
     download_dir = 'downloads'
     os.makedirs(download_dir, exist_ok=True)
     original_filename = video_file_obj.file_name
     video_path = os.path.join(download_dir, f"{uuid.uuid4()}_{original_filename}")
 
-    logger.info(f"Mengunduh video ke {video_path}...")
+    logger.info(f"-> CONVERT_VIDEO: Downloading video to {video_path}...")
     await video_file.download_to_drive(video_path)
-    logger.info("Video berhasil diunduh.")
+    logger.info(f"-> CONVERT_VIDEO: Video downloaded successfully. Storing path in user_data.")
     context.user_data['video_path'] = video_path
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("4K", callback_data="convert:4k"), InlineKeyboardButton("2K", callback_data="convert:2k"), InlineKeyboardButton("1080p", callback_data="convert:1080p")],
         [InlineKeyboardButton("720p", callback_data="convert:720p"), InlineKeyboardButton("480p", callback_data="convert:480p"), InlineKeyboardButton("360p", callback_data="convert:360p")],
     ])
     await update.message.reply_text("Pilih resolusi target:", reply_markup=keyboard)
+    logger.info("-> CONVERT_VIDEO: Prompted user for resolution. Returning GET_RESOLUTION state.")
     return GET_RESOLUTION
 
 async def apply_conversion(update: Update, context: CallbackContext) -> int:
-    logger.info("Memasuki state apply_conversion.")
+    logger.info("-> CONVERT_VIDEO: Entering apply_conversion state.")
     query = update.callback_query
     await query.answer()
     target_resolution = query.data.split(':')[1]
     video_path = context.user_data.get('video_path')
 
+    logger.info(f"-> CONVERT_VIDEO: Callback received for resolution: {target_resolution}")
     if not video_path or not os.path.exists(video_path):
-        logger.error("Path video tidak ditemukan di user_data saat mencoba konversi.")
+        logger.error(f"-> CONVERT_VIDEO: Video path not found in user_data or path is invalid. Path: {video_path}")
         await query.edit_message_text("Maaf, file video tidak ditemukan. Silakan mulai lagi.")
         return ConversationHandler.END
 
-    logger.info(f"Memulai konversi untuk {video_path} ke resolusi {target_resolution}.")
+    logger.info(f"-> CONVERT_VIDEO: Starting conversion for {video_path} to {target_resolution}.")
     await query.edit_message_text(f"Mengonversi video ke {target_resolution}, ini mungkin memakan waktu...")
     converted_path = ""
     try:
         converted_path = convert_video_resolution(video_path, target_resolution)
-        logger.info(f"Konversi berhasil, file baru di: {converted_path}")
+        logger.info(f"-> CONVERT_VIDEO: Conversion successful. New file at: {converted_path}")
         with open(converted_path, 'rb') as video_file:
             await query.message.reply_video(video=video_file, caption=f"Video dikonversi ke {target_resolution}")
         await query.delete_message()
+        logger.info("-> CONVERT_VIDEO: Sent converted video to user and deleted status message.")
     except Exception as e:
-        logger.error(f"Terjadi error saat menjalankan convert_video_resolution: {e}", exc_info=True)
+        logger.error(f"-> CONVERT_VIDEO: Error during convert_video_resolution call: {e}", exc_info=True)
         await query.edit_message_text("Maaf, terjadi kesalahan saat mengonversi video.")
     finally:
-        logger.info("Membersihkan file video sementara.")
+        logger.info("-> CONVERT_VIDEO: Entering cleanup phase.")
         if os.path.exists(video_path):
             os.remove(video_path)
+            logger.info(f"-> CONVERT_VIDEO: Cleaned up original file: {video_path}")
         if converted_path and os.path.exists(converted_path):
             os.remove(converted_path)
+            logger.info(f"-> CONVERT_VIDEO: Cleaned up converted file: {converted_path}")
         if 'video_path' in context.user_data:
             del context.user_data['video_path']
+            logger.info("-> CONVERT_VIDEO: Removed video_path from user_data.")
+    logger.info("-> CONVERT_VIDEO: Exiting conversation.")
     return ConversationHandler.END
 
 
@@ -432,9 +470,10 @@ def main() -> None:
 
     application = Application.builder().token(token).persistence(persistence).post_init(send_online_message).post_shutdown(send_offline_message).build()
 
-    # --- Direct Command Handlers (No Conversation) ---
+    # --- App Handlers ---
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("cancel", cancel)) # Add cancel as a global fallback
 
     # --- Specific Callback Handlers ---
     application.add_handler(CallbackQueryHandler(handle_search_download, pattern="^dl_search:"))
@@ -454,8 +493,9 @@ def main() -> None:
 
     async def convert_video_start(update: Update, context: CallbackContext) -> int:
         """Starts the video conversion conversation."""
-        logger.info("Memasuki state convert_video_start.")
+        logger.info("-> CONVERT_VIDEO: Entering convert_video_start.")
         await update.message.reply_text("Silakan kirim video yang ingin Anda ubah resolusinya.")
+        logger.info("-> CONVERT_VIDEO: Prompted user for video. Returning GET_VIDEO state.")
         return GET_VIDEO
 
     async def song_start(update: Update, context: CallbackContext) -> int:
