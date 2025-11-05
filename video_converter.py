@@ -18,8 +18,11 @@ def convert_video_resolution(input_path: str, target_resolution: str) -> str:
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
-    filename = os.path.basename(input_path)
-    output_path = f"converted_{target_resolution}_{filename}"
+    # Pastikan file output selalu punya ekstensi .mp4
+    base_filename, _ = os.path.splitext(os.path.basename(input_path))
+    output_filename = f"converted_{target_resolution}_{base_filename}.mp4"
+    # Tempatkan file output di direktori yang sama dengan input
+    output_path = os.path.join(os.path.dirname(input_path), output_filename)
 
     # Map friendly names to ffmpeg scale parameters
     # -2 ensures the width is divisible by 2, which is required by many codecs.

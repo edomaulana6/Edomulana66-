@@ -190,7 +190,7 @@ async def handle_search_download(update: Update, context: CallbackContext) -> No
     logger.info(f"-> SEARCH_DL: Parsed callback. Format: {format_choice}, Video ID: {video_id}")
     await query.edit_message_reply_markup(reply_markup=None)
     logger.info("-> SEARCH_DL: Removed inline keyboard.")
-    sticker_message = await query.message.reply_sticker("CAACAgIAAxkBAAIEv2X0x4-v2-5v3e_wY_v2-5v3e_wYAAJ-BwAC-5-xS_v2-5v3e_wYHgQ")
+    status_message = await query.message.reply_text("⏳ Memproses permintaan Anda...")
     try:
         logger.info(f"-> SEARCH_DL: Calling download_file for Video ID: {video_id}")
         await download_file(video_id, format_choice, update, context)
@@ -199,9 +199,9 @@ async def handle_search_download(update: Update, context: CallbackContext) -> No
         logger.error(f"-> SEARCH_DL: Error during download_file call from search: {e}", exc_info=True)
         await query.message.reply_text("❌ Gagal mengunduh file dari hasil pencarian.")
     finally:
-        if sticker_message:
-            await sticker_message.delete()
-            logger.info("-> SEARCH_DL: Deleted sticker message.")
+        if status_message:
+            await status_message.delete()
+            logger.info("-> SEARCH_DL: Deleted status message.")
 
 async def handle_url_download(update: Update, context: CallbackContext) -> None:
     """Handles download callbacks from a submitted URL (using a UUID key)."""
@@ -226,7 +226,7 @@ async def handle_url_download(update: Update, context: CallbackContext) -> None:
     logger.info(f"-> URL_DL: Retrieved URL '{url}' from user_data.")
     await query.edit_message_reply_markup(reply_markup=None)
     logger.info("-> URL_DL: Removed inline keyboard.")
-    sticker_message = await query.message.reply_sticker("CAACAgIAAxkBAAIEv2X0x4-v2-5v3e_wY_v2-5v3e_wYAAJ-BwAC-5-xS_v2-5v3e_wYHgQ")
+    status_message = await query.message.reply_text("⏳ Memproses permintaan Anda...")
     try:
         logger.info(f"-> URL_DL: Calling download_file for URL key: {url_key}")
         await download_file(url, format_choice, update, context)
@@ -235,9 +235,9 @@ async def handle_url_download(update: Update, context: CallbackContext) -> None:
         logger.error(f"-> URL_DL: Error during download_file call from URL: {e}", exc_info=True)
         await query.message.reply_text("❌ Gagal mengunduh file dari URL.")
     finally:
-        if sticker_message:
-            await sticker_message.delete()
-            logger.info("-> URL_DL: Deleted sticker message.")
+        if status_message:
+            await status_message.delete()
+            logger.info("-> URL_DL: Deleted status message.")
 
 async def download_file(identifier: str, format_choice: str, update: Update, context: CallbackContext):
     logger.info(f"-> DOWNLOAD_FILE: Starting process for identifier: {identifier}, format: {format_choice}")
@@ -353,7 +353,13 @@ async def get_video(update: Update, context: CallbackContext) -> int:
     video_file = await video_file_obj.get_file()
     download_dir = 'downloads'
     os.makedirs(download_dir, exist_ok=True)
+
+    # Menangani video tanpa nama file asli (misalnya, dari Telegram mobile)
     original_filename = video_file_obj.file_name
+    if not original_filename:
+        logger.warning("-> CONVERT_VIDEO: Video does not have an original filename. Assigning a default name.")
+        original_filename = f"video_{uuid.uuid4()}.mp4"
+
     video_path = os.path.join(download_dir, f"{uuid.uuid4()}_{original_filename}")
 
     logger.info(f"-> CONVERT_VIDEO: Downloading video to {video_path}...")
