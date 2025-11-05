@@ -33,7 +33,7 @@ Bot Telegram serbaguna yang dirancang untuk berjalan di Termux, mampu mengunduh 
 -   `/start`: Memulai interaksi dengan bot.
 -   `/help`: Menampilkan pesan bantuan ini.
 -   `/search <query>`: Mencari video/musik berdasarkan kueri yang diberikan.
--   `/song <query>`: Langsung mengunduh lagu teratas yang cocok dengan kueri Anda.
+-   `/song`: Memulai alur interaktif untuk mengunduh sebuah lagu.
 -   `/download <url>`: Mengunduh media dari URL yang diberikan.
 -   `/enhance_photo`: Memulai alur interaktif untuk meningkatkan kualitas foto.
 -   `/convert_video`: Memulai alur interaktif untuk mengubah resolusi video.
