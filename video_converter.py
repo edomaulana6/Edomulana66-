@@ -1,5 +1,49 @@
 import subprocess
 import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+def enhance_video_quality(input_path: str) -> str:
+    """
+    Re-encodes a video to a higher quality using a lower CRF value.
+
+    Args:
+        input_path: Path to the input video file.
+
+    Returns:
+        Path to the enhanced video file.
+
+    Raises:
+        RuntimeError: If ffmpeg command fails.
+    """
+    if not os.path.exists(input_path):
+        raise FileNotFoundError(f"Input file not found: {input_path}")
+
+    base_filename, _ = os.path.splitext(os.path.basename(input_path))
+    output_filename = f"enhanced_quality_{base_filename}.mp4"
+    output_path = os.path.join(os.path.dirname(input_path), output_filename)
+
+    command = [
+        'ffmpeg',
+        '-i', input_path,
+        '-c:v', 'libx264',
+        '-crf', '18',  # Lower CRF means better quality
+        '-preset', 'slow', # Slower preset for better compression
+        '-c:a', 'copy',
+        '-y',
+        output_path
+    ]
+
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        logger.info(f"FFmpeg stdout (enhance): {result.stdout}")
+    except subprocess.CalledProcessError as e:
+        error_message = f"FFmpeg failed while enhancing quality (exit code {e.returncode}).\nStderr: {e.stderr}"
+        logger.error(error_message)
+        raise RuntimeError(error_message)
+
+    return output_path
 
 def convert_video_resolution(input_path: str, target_resolution: str) -> str:
     """

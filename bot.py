@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 # --- Feature Imports ---
 from image_enhancer import enhance_photo
-from video_converter import convert_video_resolution
+from video_converter import convert_video_resolution, enhance_video_quality
 
 # --- Helper Functions ---
 
@@ -393,47 +393,56 @@ async def get_video(update: Update, context: CallbackContext) -> int:
     logger.info(f"-> CONVERT_VIDEO: Video downloaded successfully. Storing path in user_data.")
     context.user_data['video_path'] = video_path
     keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✨ Tingkatkan Kualitas", callback_data="convert:enhance_quality")],
         [InlineKeyboardButton("4K", callback_data="convert:4k"), InlineKeyboardButton("2K", callback_data="convert:2k"), InlineKeyboardButton("1080p", callback_data="convert:1080p")],
         [InlineKeyboardButton("720p", callback_data="convert:720p"), InlineKeyboardButton("480p", callback_data="convert:480p"), InlineKeyboardButton("360p", callback_data="convert:360p")],
     ])
-    await update.message.reply_text("Pilih resolusi target:", reply_markup=keyboard)
-    logger.info("-> CONVERT_VIDEO: Prompted user for resolution. Returning GET_RESOLUTION state.")
+    await update.message.reply_text("Pilih tindakan untuk video:", reply_markup=keyboard)
+    logger.info("-> CONVERT_VIDEO: Prompted user for action. Returning GET_RESOLUTION state.")
     return GET_RESOLUTION
 
 async def apply_conversion(update: Update, context: CallbackContext) -> int:
     logger.info("-> CONVERT_VIDEO: Entering apply_conversion state.")
     query = update.callback_query
     await query.answer()
-    target_resolution = query.data.split(':')[1]
+    action = query.data.split(':')[1]
     video_path = context.user_data.get('video_path')
 
-    logger.info(f"-> CONVERT_VIDEO: Callback received for resolution: {target_resolution}")
+    logger.info(f"-> CONVERT_VIDEO: Callback received for action: {action}")
     if not video_path or not os.path.exists(video_path):
         logger.error(f"-> CONVERT_VIDEO: Video path not found in user_data or path is invalid. Path: {video_path}")
         await query.edit_message_text("Maaf, file video tidak ditemukan. Silakan mulai lagi.")
         return ConversationHandler.END
 
-    logger.info(f"-> CONVERT_VIDEO: Starting conversion for {video_path} to {target_resolution}.")
-    await query.edit_message_text(f"Mengonversi video ke {target_resolution}, ini mungkin memakan waktu...")
-    converted_path = ""
+    processed_path = ""
     try:
-        converted_path = convert_video_resolution(video_path, target_resolution)
-        logger.info(f"-> CONVERT_VIDEO: Conversion successful. New file at: {converted_path}")
-        with open(converted_path, 'rb') as video_file:
-            await query.message.reply_video(video=video_file, caption=f"Video dikonversi ke {target_resolution}")
+        if action == "enhance_quality":
+            logger.info(f"-> CONVERT_VIDEO: Starting quality enhancement for {video_path}.")
+            await query.edit_message_text("✨ Meningkatkan kualitas video, ini mungkin memakan waktu lebih lama...")
+            processed_path = enhance_video_quality(video_path)
+            caption = "Kualitas video telah ditingkatkan."
+        else:
+            logger.info(f"-> CONVERT_VIDEO: Starting conversion for {video_path} to {action}.")
+            await query.edit_message_text(f"Mengonversi video ke {action}, ini mungkin memakan waktu...")
+            processed_path = convert_video_resolution(video_path, action)
+            caption = f"Video dikonversi ke {action}."
+
+        logger.info(f"-> CONVERT_VIDEO: Processing successful. New file at: {processed_path}")
+        with open(processed_path, 'rb') as video_file:
+            await query.message.reply_video(video=video_file, caption=caption)
         await query.delete_message()
-        logger.info("-> CONVERT_VIDEO: Sent converted video to user and deleted status message.")
+        logger.info("-> CONVERT_VIDEO: Sent processed video to user and deleted status message.")
     except Exception as e:
-        logger.error(f"-> CONVERT_VIDEO: Error during convert_video_resolution call: {e}", exc_info=True)
-        await query.edit_message_text("Maaf, terjadi kesalahan saat mengonversi video.")
+        logger.error(f"-> CONVERT_VIDEO: Error during video processing call: {e}", exc_info=True)
+        await query.edit_message_text("Maaf, terjadi kesalahan saat memproses video. File mungkin rusak atau tidak didukung.")
     finally:
         logger.info("-> CONVERT_VIDEO: Entering cleanup phase.")
         if os.path.exists(video_path):
             os.remove(video_path)
             logger.info(f"-> CONVERT_VIDEO: Cleaned up original file: {video_path}")
-        if converted_path and os.path.exists(converted_path):
-            os.remove(converted_path)
-            logger.info(f"-> CONVERT_VIDEO: Cleaned up converted file: {converted_path}")
+        if processed_path and os.path.exists(processed_path):
+            os.remove(processed_path)
+            logger.info(f"-> CONVERT_VIDEO: Cleaned up processed file: {processed_path}")
         if 'video_path' in context.user_data:
             del context.user_data['video_path']
             logger.info("-> CONVERT_VIDEO: Removed video_path from user_data.")
@@ -546,6 +555,8 @@ def main() -> None:
             GET_SONG_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, song_get_title)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        conversation_timeout=300,
+        allow_reentry=True,
     )
 
     enhance_conv = ConversationHandler(
@@ -555,6 +566,8 @@ def main() -> None:
             GET_ENHANCEMENT: [CallbackQueryHandler(apply_enhancement, pattern="^enhance:")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        conversation_timeout=300,
+        allow_reentry=True,
     )
 
     convert_conv = ConversationHandler(
@@ -564,6 +577,8 @@ def main() -> None:
             GET_RESOLUTION: [CallbackQueryHandler(apply_conversion, pattern="^convert:")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        conversation_timeout=300,
+        allow_reentry=True,
     )
 
     async def search_start(update: Update, context: CallbackContext) -> int:
@@ -583,6 +598,8 @@ def main() -> None:
             GET_SEARCH_QUERY: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_get_query)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        conversation_timeout=300,
+        allow_reentry=True,
     )
 
     async def download_start(update: Update, context: CallbackContext) -> int:
@@ -605,6 +622,8 @@ def main() -> None:
             GET_DOWNLOAD_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, download_get_url)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        conversation_timeout=300,
+        allow_reentry=True,
     )
 
     application.add_handler(download_conv)
