@@ -132,7 +132,19 @@ async def perform_song_download(query: str, update: Update, context: CallbackCon
         if base_path and base_path != final_path and os.path.exists(base_path): os.remove(base_path)
 
 async def cancel(update: Update, context: CallbackContext) -> int:
+    """Cancels and ends the conversation, clearing any temporary user data."""
+    logger.info("-> CANCEL: User triggered cancel command.")
+
+    # Proactively clear any temporary data to prevent state bleeding
+    if 'photo_path' in context.user_data:
+        del context.user_data['photo_path']
+        logger.info("-> CANCEL: Cleared temporary photo_path from user_data.")
+    if 'video_path' in context.user_data:
+        del context.user_data['video_path']
+        logger.info("-> CANCEL: Cleared temporary video_path from user_data.")
+
     await update.message.reply_text("Operasi dibatalkan.")
+    logger.info("-> CANCEL: Conversation ended successfully.")
     return ConversationHandler.END
 
 # --- Standard Command Handlers ---
@@ -493,7 +505,6 @@ def main() -> None:
     # --- App Handlers ---
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("cancel", cancel)) # Add cancel as a global fallback
 
     # --- Specific Callback Handlers ---
     application.add_handler(CallbackQueryHandler(handle_search_download, pattern="^dl_search:"))
