@@ -330,7 +330,16 @@ async def download_file(identifier: str, format_choice: str, update: Update, con
 # --- Interactive Conversation Handlers (for features that need them) ---
 
 async def get_photo(update: Update, context: CallbackContext) -> int:
-    photo_file = await update.message.photo[-1].get_file()
+    """Receives a photo, either as a direct photo or as a document."""
+    logger.info("-> ENHANCE: Entering get_photo state.")
+    photo_obj = update.message.photo[-1] if update.message.photo else update.message.document
+
+    if not photo_obj:
+        logger.warning("-> ENHANCE: No valid photo or document object found.")
+        await update.message.reply_text("File tidak valid. Pastikan Anda mengirim foto atau file gambar.")
+        return GET_PHOTO
+
+    photo_file = await photo_obj.get_file()
     download_dir = 'downloads'
     os.makedirs(download_dir, exist_ok=True)
     photo_path = os.path.join(download_dir, f"{uuid.uuid4()}.jpg")
@@ -371,8 +380,8 @@ async def get_video(update: Update, context: CallbackContext) -> int:
     logger.info("-> CONVERT_VIDEO: Entering get_video state.")
     video_file_obj = update.message.video or update.message.document
     if not video_file_obj:
-        logger.warning("-> CONVERT_VIDEO: Message received in get_video state, but it's not a video or document. Rejecting.")
-        await update.message.reply_text("File tidak valid. Pastikan Anda mengirim video.")
+        logger.warning("-> CONVERT_VIDEO: Message received in get_video state, but it's not a valid video or document. Rejecting.")
+        await update.message.reply_text("File tidak valid. Pastikan Anda mengirim video atau file video.")
         return GET_VIDEO
 
     logger.info(f"-> CONVERT_VIDEO: Video object received: {video_file_obj.file_name} (ID: {video_file_obj.file_id})")
@@ -562,7 +571,7 @@ def main() -> None:
     enhance_conv = ConversationHandler(
         entry_points=[CommandHandler("enhance_photo", enhance_photo_start)],
         states={
-            GET_PHOTO: [MessageHandler(filters.PHOTO, get_photo)],
+            GET_PHOTO: [MessageHandler(filters.PHOTO | filters.Document.IMAGE, get_photo)],
             GET_ENHANCEMENT: [CallbackQueryHandler(apply_enhancement, pattern="^enhance:")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
@@ -573,7 +582,7 @@ def main() -> None:
     convert_conv = ConversationHandler(
         entry_points=[CommandHandler("convert_video", convert_video_start)],
         states={
-            GET_VIDEO: [MessageHandler(filters.VIDEO | filters.Document.VIDEO, get_video)],
+            GET_VIDEO: [MessageHandler(filters.VIDEO | filters.Document.VIDEO | filters.Document.MimeType("video/*"), get_video)],
             GET_RESOLUTION: [CallbackQueryHandler(apply_conversion, pattern="^convert:")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
