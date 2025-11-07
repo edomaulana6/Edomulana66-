@@ -28,8 +28,8 @@ if [ -f $PID_FILE ]; then
 fi
 
 echo "Memulai bot di latar belakang..."
-# echo "Mengaktifkan Termux wake lock untuk mencegah bot mati..."
-# termux-wake-lock &
+echo "Mengaktifkan Termux wake lock untuk mencegah bot mati..."
+termux-wake-lock &
 
 # Jalankan bot menggunakan nohup, arahkan output ke log
 nohup python3 bot.py > $LOG_FILE 2>&1 &
