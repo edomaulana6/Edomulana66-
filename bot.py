@@ -281,12 +281,26 @@ async def download_file(identifier: str, format_choice: str, update: Update, con
                 thumbnail_data = response.content
             except requests.RequestException as e:
                 logger.warning(f"-> DOWNLOAD_FILE: Gagal mengunduh thumbnail: {e}")
-        sender = effective_update.message.reply_audio if format_choice == 'audio' else effective_update.message.reply_video
         with open(final_path, 'rb') as file_to_send:
             file_extension = 'mp3' if format_choice == 'audio' else info_dict.get('ext', 'mp4')
             filename = f"{sanitized_title}.{file_extension}"
             logger.info(f"-> DOWNLOAD_FILE: Sending file '{filename}' (Size: {os.path.getsize(final_path)} bytes) via Telegram API.")
-            await sender(file_to_send, caption=caption_text, title=caption_text, filename=filename, thumbnail=thumbnail_data)
+
+            if format_choice == 'audio':
+                await effective_update.message.reply_audio(
+                    audio=file_to_send,
+                    caption=caption_text,
+                    title=caption_text,
+                    filename=filename,
+                    thumbnail=thumbnail_data
+                )
+            else:
+                await effective_update.message.reply_video(
+                    video=file_to_send,
+                    caption=caption_text,
+                    filename=filename
+                )
+
             logger.info("-> DOWNLOAD_FILE: Telegram API call completed.")
     except Exception as e:
         logger.error(f"-> DOWNLOAD_FILE: An exception occurred: {e}", exc_info=True)
