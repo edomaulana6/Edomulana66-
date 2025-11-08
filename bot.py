@@ -377,12 +377,20 @@ async def apply_enhancement(update: Update, context: CallbackContext) -> int:
     return ConversationHandler.END
 
 async def get_video(update: Update, context: CallbackContext) -> int:
-    logger.info("-> CONVERT_VIDEO: Entering get_video state.")
-    video_file_obj = update.message.video or update.message.document
-    if not video_file_obj or (hasattr(video_file_obj, 'mime_type') and 'video' not in video_file_obj.mime_type):
-        logger.warning("-> CONVERT_VIDEO: Message received is not a valid video or video document. Rejecting.")
-        await update.message.reply_text("File tidak valid. Pastikan Anda mengirim video atau file video.")
-        return GET_VIDEO
+    logger.info("-> CONVERT_VIDEO: Entering get_video state (now filtering all message types).")
+
+    # Explicitly check for a video or a document, and if document, check mime type.
+    if update.message.video:
+        video_file_obj = update.message.video
+    elif update.message.document and update.message.document.mime_type and 'video' in update.message.document.mime_type:
+        video_file_obj = update.message.document
+    else:
+        # This handles text, stickers, photos, etc.
+        logger.warning(f"-> CONVERT_VIDEO: Received a non-video message type. Rejecting.")
+        await update.message.reply_text(
+            "Perintah ini sedang berjalan. Silakan kirim video atau file video, atau batalkan dengan /cancel."
+        )
+        return GET_VIDEO # Stay in the same state, waiting for a valid video
 
     logger.info(f"-> CONVERT_VIDEO: Video object received: {video_file_obj.file_name} (ID: {video_file_obj.file_id})")
     video_file = await video_file_obj.get_file()
@@ -582,7 +590,7 @@ def main() -> None:
     convert_conv = ConversationHandler(
         entry_points=[CommandHandler("convert_video", convert_video_start)],
         states={
-            GET_VIDEO: [MessageHandler(filters.VIDEO | filters.Document(), get_video)],
+            GET_VIDEO: [MessageHandler(filters.ALL, get_video)],
             GET_RESOLUTION: [CallbackQueryHandler(apply_conversion, pattern="^convert:")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
