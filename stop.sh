@@ -1,20 +1,18 @@
 #!/bin/bash
 PID_FILE="bot.pid"
 
-echo "Mencoba menghentikan bot..."
-
-if [ ! -f $PID_FILE ]; then
-    echo "Bot sepertinya tidak berjalan (file $PID_FILE tidak ditemukan)."
-else
+echo "Attempting to stop the bot..."
+if [ -f $PID_FILE ]; then
     PID=$(cat $PID_FILE)
     if ps -p $PID > /dev/null; then
         kill $PID
-        echo "Proses bot dengan PID $PID telah dihentikan."
+        echo "Bot process with PID $PID has been terminated."
     else
-        echo "Proses dengan PID $PID tidak ditemukan."
+        echo "Bot process with PID $PID not found."
     fi
-    rm -f $PID_FILE
+    rm $PID_FILE
+else
+    echo "Bot does not seem to be running (PID file not found)."
 fi
-
-echo "Melepaskan Termux wake lock..."
 termux-wake-unlock
+echo "Cleanup complete."
