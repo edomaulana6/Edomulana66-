@@ -48,7 +48,7 @@ async def download_media(identifier: str, format_choice: str, effective_message)
     if format_choice == 'audio':
         ydl_opts.update({'format': 'bestaudio/best', 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}]})
     else:
-        ydl_opts.update({'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'})
+        ydl_opts.update({'format': 'bestvideo+bestaudio/best'})
 
     path, base_path = "", ""
     try:
@@ -106,7 +106,12 @@ async def download_get_url(update: Update, context: CallbackContext):
         with yt_dlp.YoutubeDL({'quiet': True, 'noplaylist': True}) as ydl: info = ydl.extract_info(url, download=False)
         context.user_data['url_info'] = {'url': url, 'title': info.get('title', 'Tanpa Judul')}
         keyboard = [[InlineKeyboardButton("🎧 Audio", callback_data=f"dl_url:audio"), InlineKeyboardButton("🎬 Video", callback_data=f"dl_url:video")]]
-        await update.message.reply_text(f"Pilih format untuk:\n*{info.get('title')}*", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        thumbnail_url = info.get('thumbnail')
+        caption = f"Pilih format untuk:\n*{info.get('title')}*"
+        if thumbnail_url:
+            await update.message.reply_photo(photo=thumbnail_url, caption=caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        else:
+            await update.message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
     except Exception as e:
         await update.message.reply_text(f"Gagal memproses URL: {e}")
     return ConversationHandler.END
@@ -117,15 +122,31 @@ async def search_start(update: Update, context: CallbackContext):
 
 async def search_get_query(update: Update, context: CallbackContext):
     try:
-        with yt_dlp.YoutubeDL({'default_search': 'ytsearch5', 'quiet': True, 'noplaylist': True}) as ydl: result = ydl.extract_info(update.message.text, download=False)
+        ydl_opts = {
+            'default_search': 'ytsearch5',
+            'quiet': True,
+            'noplaylist': True,
+            'xff': 'ID'
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl: result = ydl.extract_info(update.message.text, download=False)
         if not result.get('entries'):
-            await update.message.reply_text("Tidak ada hasil.")
+            await update.message.reply_text("Tidak ada hasil yang cocok dengan filter regional.")
             return ConversationHandler.END
 
         for entry in result['entries'][:5]:
             context.user_data[f"search_{entry['id']}"] = {'url': entry['webpage_url'], 'title': entry['title']}
             keyboard = [[InlineKeyboardButton("🎧 Audio", callback_data=f"dl_search:audio:{entry['id']}"), InlineKeyboardButton("🎬 Video", callback_data=f"dl_search:video:{entry['id']}")]]
-            await update.message.reply_text(f"*{entry['title']}*", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            thumbnail_url = entry.get('thumbnail')
+            caption = f"*{entry['title']}*"
+
+            try:
+                if thumbnail_url:
+                    await update.message.reply_photo(photo=thumbnail_url, caption=caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+                else:
+                    await update.message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            except Exception as e:
+                logger.warning(f"Could not send thumbnail for {entry['id']} ({thumbnail_url}): {e}. Sending as text.")
+                await update.message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
     except Exception as e:
         await update.message.reply_text(f"Gagal mencari: {e}")
     return ConversationHandler.END
@@ -169,11 +190,11 @@ async def get_video(update: Update, context: CallbackContext):
     await file.download_to_drive(path)
     context.user_data['video_path'] = path
 
-    keyboard = [[
-        InlineKeyboardButton("✨ Tingkatkan Kualitas", callback_data="convert:enhance_quality"),
-        InlineKeyboardButton("1080p", callback_data="convert:1080p"),
-        InlineKeyboardButton("720p", callback_data="convert:720p"),
-    ]]
+    keyboard = [
+        [InlineKeyboardButton("✨ Tingkatkan Kualitas", callback_data="convert:enhance_quality")],
+        [InlineKeyboardButton("4k", callback_data="convert:4k"), InlineKeyboardButton("2k", callback_data="convert:2k")],
+        [InlineKeyboardButton("1080p", callback_data="convert:1080p"), InlineKeyboardButton("720p", callback_data="convert:720p")]
+    ]
     await update.message.reply_text("Pilih tindakan:", reply_markup=InlineKeyboardMarkup(keyboard))
     return GET_PROCESS_ACTION
 
@@ -222,7 +243,7 @@ async def video_processing_handler(update: Update, context: CallbackContext):
             await query.edit_message_text(f"🎬 Mengonversi ke {action}...")
             processed_path, caption = convert_video_resolution(path, action), f"Video dikonversi ke {action}."
 
-        with open(processed_path, 'rb') as f: await query.message.reply_video(f, caption=caption)
+        with open(processed_path, 'rb') as f: await query.message.reply_video(f)
     except Exception as e:
         await query.edit_message_text(f"Gagal memproses video: {e}")
     finally:

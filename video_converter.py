@@ -37,6 +37,7 @@ def convert_video_resolution(input_path: str, target_resolution: str) -> str:
     output_path = os.path.join(os.path.dirname(input_path), output_filename)
 
     resolution_map = {
+        "4k": "scale=-2:2160", "2k": "scale=-2:1440",
         "1080p": "scale=-2:1080", "720p": "scale=-2:720",
         "480p": "scale=-2:480", "360p": "scale=-2:360",
     }
