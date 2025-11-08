@@ -582,7 +582,7 @@ def main() -> None:
     convert_conv = ConversationHandler(
         entry_points=[CommandHandler("convert_video", convert_video_start)],
         states={
-            GET_VIDEO: [MessageHandler(filters.VIDEO | filters.Document, get_video)],
+            GET_VIDEO: [MessageHandler(filters.VIDEO | filters.Document(), get_video)],
             GET_RESOLUTION: [CallbackQueryHandler(apply_conversion, pattern="^convert:")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
