@@ -379,8 +379,8 @@ async def apply_enhancement(update: Update, context: CallbackContext) -> int:
 async def get_video(update: Update, context: CallbackContext) -> int:
     logger.info("-> CONVERT_VIDEO: Entering get_video state.")
     video_file_obj = update.message.video or update.message.document
-    if not video_file_obj:
-        logger.warning("-> CONVERT_VIDEO: Message received in get_video state, but it's not a valid video or document. Rejecting.")
+    if not video_file_obj or (hasattr(video_file_obj, 'mime_type') and 'video' not in video_file_obj.mime_type):
+        logger.warning("-> CONVERT_VIDEO: Message received is not a valid video or video document. Rejecting.")
         await update.message.reply_text("File tidak valid. Pastikan Anda mengirim video atau file video.")
         return GET_VIDEO
 
@@ -582,7 +582,7 @@ def main() -> None:
     convert_conv = ConversationHandler(
         entry_points=[CommandHandler("convert_video", convert_video_start)],
         states={
-            GET_VIDEO: [MessageHandler(filters.VIDEO | filters.Document.VIDEO | filters.Document.MimeType("video/*"), get_video)],
+            GET_VIDEO: [MessageHandler(filters.VIDEO | filters.Document, get_video)],
             GET_RESOLUTION: [CallbackQueryHandler(apply_conversion, pattern="^convert:")],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
