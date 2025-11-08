@@ -1,14 +1,4 @@
-# File ini berisi semua dependensi Python yang diperlukan untuk menjalankan bot.
-# Gunakan perintah 'pip install -r requirements.txt' untuk menginstal semuanya.
-
 python-telegram-bot[ext]==21.0.1
-requests==2.31.0
-
-# Menginstal yt-dlp versi terbaru langsung dari GitHub
 yt-dlp @ git+https://github.com/yt-dlp/yt-dlp.git
-
-# Untuk pemrosesan gambar
 Pillow==10.1.0
-
-# Untuk memuat file .env
 python-dotenv==1.0.0

@@ -1,61 +1,31 @@
 import os
-import sys
-
-ENV_FILE = ".env"
 
 def main():
-    print("--- 🚀 Setup Bot Telegram Anti-Gagal 🚀 ---")
+    """
+    Guides the user through creating a .env file for the bot.
+    """
+    print("--- 🤖 Bot Setup Assistant 🤖 ---")
+    print("This script will help you set up the .env file for the bot.")
 
-    # 1. Minta Token
-    token = input("➡️  Masukkan token bot Anda dari @BotFather: ").strip()
+    if os.path.exists('.env'):
+        print("\n[⚠️] An '.env' file already exists.")
+        overwrite = input("Do you want to overwrite it? (yes/no): ").lower()
+        if overwrite not in ['yes', 'y']:
+            print("\nSetup cancelled. Your existing .env file has been preserved.")
+            return
 
-    if ':' not in token or len(token) < 20:
-        print("\n[❌] KESALAHAN FATAL: Format token tidak valid. Pastikan Anda menyalin token lengkap.")
-        sys.exit(1)
+    token = input("\nPlease paste your Telegram Bot Token here:\n> ")
 
-    # 2. Tulis ke File
-    try:
-        with open(ENV_FILE, 'w') as f:
-            f.write(f'TELEGRAM_TOKEN="{token}"\n')
-        print(f"\n[📝] File '{ENV_FILE}' berhasil ditulis...")
-    except IOError as e:
-        print(f"\n[❌] KESALAHAN FATAL: Gagal menulis file: {e}")
-        print("Pastikan Anda memiliki izin tulis (write permission) di direktori ini.")
-        sys.exit(1)
+    if not token or len(token.split(':')) != 2:
+        print("\n[❌] Error: That doesn't look like a valid Telegram token.")
+        print("Setup failed. Please run the script again with a valid token.")
+        return
 
-    # 3. Verifikasi File
-    print("[🔍] Memverifikasi file yang baru saja ditulis...")
-    try:
-        with open(ENV_FILE, 'r') as f:
-            content = f.read().strip()
+    with open('.env', 'w') as f:
+        f.write(f"TELEGRAM_TOKEN={token}\n")
 
-        expected_content = f'TELEGRAM_TOKEN="{token}"'
-
-        if content == expected_content:
-            print("\n" + "="*40)
-            print("✅✅✅ SETUP BERHASIL! ✅✅✅")
-            print("="*40)
-            print(f"Token Anda telah disimpan dengan benar di '{ENV_FILE}'.")
-            print("\nSekarang, Anda bisa menjalankan bot dengan perintah:")
-            print("./start.sh")
-            print("="*40)
-        else:
-            print("\n" + "="*40)
-            print("❌❌❌ SETUP GAGAL! ❌❌❌")
-            print("="*40)
-            print("Gagal memverifikasi konten file. File mungkin rusak.")
-            print("Konten yang diharapkan:", expected_content)
-            print("Konten yang terbaca:", content)
-            print("\nSilakan coba jalankan setup ini lagi.")
-            print("="*40)
-            sys.exit(1)
-
-    except FileNotFoundError:
-        print("\n[❌] KESALAHAN FATAL: File .env tidak ditemukan setelah ditulis. Ini sangat aneh.")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n[❌] KESALAHAN FATAL: Terjadi error yang tidak diketahui saat verifikasi: {e}")
-        sys.exit(1)
+    print("\n[✅] Success! Your '.env' file has been created.")
+    print("You can now start the bot using: ./start.sh")
 
 if __name__ == "__main__":
     main()
