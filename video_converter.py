@@ -5,9 +5,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 def enhance_video_quality(input_path: str) -> str:
-    """
-    Re-encodes a video to a higher quality using a lower CRF value.
-    """
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
@@ -32,9 +29,6 @@ def enhance_video_quality(input_path: str) -> str:
     return output_path
 
 def convert_video_resolution(input_path: str, target_resolution: str) -> str:
-    """
-    Converts a video to a target resolution using ffmpeg.
-    """
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
@@ -43,8 +37,8 @@ def convert_video_resolution(input_path: str, target_resolution: str) -> str:
     output_path = os.path.join(os.path.dirname(input_path), output_filename)
 
     resolution_map = {
-        "4k": "scale=-2:2160", "2k": "scale=-2:1440", "1080p": "scale=-2:1080",
-        "720p": "scale=-2:720", "480p": "scale=-2:480", "360p": "scale=-2:360",
+        "1080p": "scale=-2:1080", "720p": "scale=-2:720",
+        "480p": "scale=-2:480", "360p": "scale=-2:360",
     }
 
     scale_param = resolution_map.get(target_resolution)
@@ -59,9 +53,9 @@ def convert_video_resolution(input_path: str, target_resolution: str) -> str:
 
     try:
         result = subprocess.run(command, check=True, capture_output=True, text=True)
-        logger.info(f"ffmpeg output: {result.stdout}")
+        logger.info(f"ffmpeg output (convert): {result.stdout}")
     except subprocess.CalledProcessError as e:
-        error_message = f"FFmpeg failed with exit code {e.returncode}.\nStderr: {e.stderr}"
+        error_message = f"FFmpeg failed while converting resolution (exit code {e.returncode}).\nStderr: {e.stderr}"
         logger.error(error_message)
         raise RuntimeError(error_message)
 
