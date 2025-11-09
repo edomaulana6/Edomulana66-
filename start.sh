@@ -11,6 +11,9 @@ if [ -f $PID_FILE ]; then
     exit 1
 fi
 
+echo "Checking for yt-dlp updates..."
+pip install -U yt-dlp
+
 echo "Starting bot in the background..."
 termux-wake-lock
 nohup python3 bot.py > bot.log 2>&1 &
