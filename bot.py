@@ -4,6 +4,7 @@ import re
 import uuid
 import sys
 import shutil
+import time
 from dotenv import load_dotenv
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -39,21 +40,39 @@ def run_pre_flight_checks():
     return True
 
 # --- Main Logic ---
-async def download_media(identifier: str, format_choice: str, effective_message):
+async def download_media(identifier: str, format_choice: str, effective_message, search_prefix: str = ""):
     status_message = await effective_message.reply_text("⏳ Memproses...")
     download_dir = 'downloads'
     os.makedirs(download_dir, exist_ok=True)
 
-    ydl_opts = {'outtmpl': os.path.join(download_dir, '%(id)s.%(ext)s'), 'noplaylist': True, 'quiet': True}
+    ydl_opts = {
+        'outtmpl': os.path.join(download_dir, '%(id)s.%(ext)s'),
+        'noplaylist': True,
+        'quiet': True,
+        'xff': 'ID'
+    }
+
     if format_choice == 'audio':
-        ydl_opts.update({'format': 'bestaudio/best', 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}]})
+        ydl_opts.update({
+            'format': 'bestaudio/best',
+            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}],
+            'match_filter': 'duration < 600', # 10 minutes for songs
+        })
+        if search_prefix:
+            ydl_opts['default_search'] = search_prefix
     else:
         ydl_opts.update({'format': 'bestvideo+bestaudio/best'})
 
     path, base_path = "", ""
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(identifier, download=True)
+            result = ydl.extract_info(identifier, download=True)
+            if 'entries' in result:
+                if not result['entries']:
+                    raise IndexError("Tidak ada hasil yang cocok dengan filter.")
+                info = result['entries'][0]
+            else:
+                info = result
             base_path = ydl.prepare_filename(info)
 
         path = os.path.splitext(base_path)[0] + '.mp3' if format_choice == 'audio' else base_path
@@ -66,6 +85,8 @@ async def download_media(identifier: str, format_choice: str, effective_message)
                 await effective_message.reply_audio(f, title=info.get('title'), filename=filename, caption=info.get('title'))
             else:
                 await effective_message.reply_video(f, filename=filename, caption=info.get('title'))
+    except IndexError:
+        await effective_message.reply_text("❌ Gagal: Tidak ada hasil yang cocok dengan filter (durasi < 10 menit).")
     except Exception as e:
         logger.error(f"Download failed for '{identifier}': {e}", exc_info=True)
         await effective_message.reply_text(f"❌ Gagal: Link tidak didukung atau error internal.")
@@ -127,9 +148,11 @@ async def search_get_query(update: Update, context: CallbackContext):
             'default_search': 'ytsearch5',
             'quiet': True,
             'noplaylist': True,
-            'xff': 'ID'
+            'xff': 'ID',
+            'match_filter': 'duration < 1800'
         }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl: result = ydl.extract_info(update.message.text, download=False)
+        search_query = f"{update.message.text} {int(time.time())}"
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl: result = ydl.extract_info(search_query, download=False)
         if not result.get('entries'):
             await update.message.reply_text("Tidak ada hasil yang cocok dengan filter regional.")
             return ConversationHandler.END
@@ -158,7 +181,8 @@ async def song_start(update: Update, context: CallbackContext):
     return GET_SONG_TITLE
 
 async def song_get_title(update: Update, context: CallbackContext):
-    await download_media(f"ytsearch1:{update.message.text}", 'audio', update.message)
+    search_query = f"{update.message.text} {int(time.time())}"
+    await download_media(search_query, 'audio', update.message, search_prefix='ytmusic1')
     return ConversationHandler.END
 
 async def enhance_photo_start(update: Update, context: CallbackContext):
@@ -176,12 +200,25 @@ async def get_photo(update: Update, context: CallbackContext):
     await update.message.reply_text("Pilih peningkatan:", reply_markup=InlineKeyboardMarkup(keyboard))
     return GET_ENHANCEMENT
 
+import subprocess
+
+def generate_thumbnail(video_path, thumbnail_path):
+    """Generates a thumbnail from the video file."""
+    try:
+        # Attempt to capture a frame from the first few seconds of the video.
+        command = ['ffmpeg', '-i', video_path, '-ss', '00:00:01.500', '-vframes', '1', '-y', thumbnail_path]
+        subprocess.run(command, check=True, capture_output=True, text=True)
+        return os.path.exists(thumbnail_path)
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Thumbnail generation failed for {video_path}: {e.stderr}")
+        return False
+
 async def convert_video_start(update: Update, context: CallbackContext):
     await update.message.reply_text("Kirim video (atau file video).")
     return GET_VIDEO
 
 async def get_video(update: Update, context: CallbackContext):
-    video_obj = update.message.video or (update.message.document if 'video' in (update.message.document.mime_type or '') else None)
+    video_obj = update.message.video or update.message.document
     if not video_obj:
         await update.message.reply_text("Ini bukan video. Kirim file video atau /cancel.")
         return GET_VIDEO
@@ -197,7 +234,21 @@ async def get_video(update: Update, context: CallbackContext):
         [InlineKeyboardButton("4k", callback_data="convert:4k"), InlineKeyboardButton("2k", callback_data="convert:2k")],
         [InlineKeyboardButton("1080p", callback_data="convert:1080p"), InlineKeyboardButton("720p", callback_data="convert:720p")]
     ]
-    await update.message.reply_text("Pilih tindakan:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    thumbnail_path = os.path.join('downloads', f"{uuid.uuid4()}.jpg")
+    if generate_thumbnail(path, thumbnail_path):
+        context.user_data['thumbnail_path'] = thumbnail_path
+        with open(thumbnail_path, 'rb') as thumb:
+            await update.message.reply_photo(
+                photo=thumb,
+                caption="Pilih tindakan:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+    else:
+        await update.message.reply_text(
+            "Pilih tindakan:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
     return GET_PROCESS_ACTION
 
 # --- Callback Handlers ---
@@ -246,22 +297,23 @@ async def video_processing_handler(update: Update, context: CallbackContext):
     await query.answer()
     if not path: return await query.edit_message_text("Error: File video tidak ditemukan.")
 
-    processed_path = ""
+    processed_path, thumb_path = "", context.user_data.get('thumbnail_path')
     try:
         if action == 'enhance_quality':
-            await query.edit_message_text("✨ Meningkatkan kualitas...")
+            await query.edit_message_caption(caption="✨ Meningkatkan kualitas...")
             processed_path, caption = enhance_video_quality(path), "Kualitas video ditingkatkan."
         else:
-            await query.edit_message_text(f"🎬 Mengonversi ke {action}...")
+            await query.edit_message_caption(caption=f"🎬 Mengonversi ke {action}...")
             processed_path, caption = convert_video_resolution(path, action), f"Video dikonversi ke {action}."
 
         with open(processed_path, 'rb') as f: await query.message.reply_video(f)
     except Exception as e:
-        await query.edit_message_text(f"Gagal memproses video: {e}")
+        await query.edit_message_caption(caption=f"Gagal memproses video: {e}")
     finally:
-        for p in [path, processed_path]:
+        for p in [path, processed_path, thumb_path]:
             if p and os.path.exists(p): os.remove(p)
         context.user_data.pop('video_path', None)
+        context.user_data.pop('thumbnail_path', None)
 
     await query.message.delete()
     return ConversationHandler.END
