@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 # --- States ---
 (
     GET_URL, GET_SEARCH_QUERY, GET_SONG_TITLE, GET_PHOTO,
-    GET_ENHANCEMENT, GET_VIDEO, GET_PROCESS_ACTION
-) = range(7)
+    GET_ENHANCEMENT, GET_VIDEO, GET_PROCESS_ACTION, CHOOSE_FORMAT
+) = range(8)
 
 # --- Pre-flight Checks ---
 def run_pre_flight_checks():
@@ -114,7 +114,8 @@ async def download_get_url(update: Update, context: CallbackContext):
             await update.message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
     except Exception as e:
         await update.message.reply_text(f"Gagal memproses URL: {e}")
-    return ConversationHandler.END
+        return ConversationHandler.END
+    return CHOOSE_FORMAT
 
 async def search_start(update: Update, context: CallbackContext):
     await update.message.reply_text("Apa yang ingin dicari?")
@@ -149,7 +150,8 @@ async def search_get_query(update: Update, context: CallbackContext):
                 await update.message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
     except Exception as e:
         await update.message.reply_text(f"Gagal mencari: {e}")
-    return ConversationHandler.END
+        return ConversationHandler.END
+    return CHOOSE_FORMAT
 
 async def song_start(update: Update, context: CallbackContext):
     await update.message.reply_text("Kirimkan judul lagu.")
@@ -200,16 +202,26 @@ async def get_video(update: Update, context: CallbackContext):
 
 # --- Callback Handlers ---
 async def download_callback_handler(update: Update, context: CallbackContext):
-    query, data_type, action, *rest = update.callback_query, *update.callback_query.data.split(':')
+    query = update.callback_query
     await query.answer()
+
+    data_type, action, *rest = query.data.split(':')
 
     info, identifier = (context.user_data.get('url_info'), context.user_data.get('url_info', {}).get('url')) if data_type == 'dl_url' else \
                        (context.user_data.get(f"search_{rest[0]}"), context.user_data.get(f"search_{rest[0]}", {}).get('url'))
 
-    if not info or not identifier: return await query.edit_message_text("Error: Sesi kedaluwarsa.")
+    if not info or not identifier:
+        await query.edit_message_text("Error: Sesi kedaluwarsa.")
+        return ConversationHandler.END
 
-    await query.edit_message_text(f"Mengunduh *{info.get('title', '')}*...", parse_mode='Markdown')
+    try:
+        await query.edit_message_caption(caption=f"Mengunduh *{info.get('title', '')}*...", reply_markup=None, parse_mode='Markdown')
+    except Exception:
+        await query.edit_message_text(text=f"Mengunduh *{info.get('title', '')}*...", reply_markup=None, parse_mode='Markdown')
+
     await download_media(identifier, action, query.message)
+    await query.message.delete()
+    return ConversationHandler.END
 
 async def photo_enhancement_handler(update: Update, context: CallbackContext):
     query, path = update.callback_query, context.user_data.get('photo_path')
@@ -261,15 +273,38 @@ def main():
     app = Application.builder().token(os.getenv("TELEGRAM_TOKEN")).persistence(PicklePersistence(filepath="bot_persistence")).build()
     conv_defaults = {'allow_reentry': True, 'conversation_timeout': 300, 'fallbacks': [CommandHandler("cancel", cancel)]}
 
-    app.add_handler(ConversationHandler(entry_points=[CommandHandler("download", download_start)], states={GET_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, download_get_url)]}, **conv_defaults))
-    app.add_handler(ConversationHandler(entry_points=[CommandHandler("search", search_start)], states={GET_SEARCH_QUERY: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_get_query)]}, **conv_defaults))
+    download_conv = ConversationHandler(
+        entry_points=[CommandHandler("download", download_start)],
+        states={
+            GET_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, download_get_url)],
+            CHOOSE_FORMAT: [CallbackQueryHandler(download_callback_handler, pattern="^dl_url:")],
+        },
+        **conv_defaults
+    )
+    search_conv = ConversationHandler(
+        entry_points=[CommandHandler("search", search_start)],
+        states={
+            GET_SEARCH_QUERY: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_get_query)],
+            CHOOSE_FORMAT: [CallbackQueryHandler(download_callback_handler, pattern="^dl_search:")],
+        },
+        **conv_defaults
+    )
+
+    app.add_handler(download_conv)
+    app.add_handler(search_conv)
     app.add_handler(ConversationHandler(entry_points=[CommandHandler("song", song_start)], states={GET_SONG_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, song_get_title)]}, **conv_defaults))
     app.add_handler(ConversationHandler(entry_points=[CommandHandler("enhance_photo", enhance_photo_start)], states={GET_PHOTO: [MessageHandler(filters.PHOTO | filters.Document.IMAGE, get_photo)], GET_ENHANCEMENT: [CallbackQueryHandler(photo_enhancement_handler, pattern="^enhance:")]}, **conv_defaults))
-    app.add_handler(ConversationHandler(entry_points=[CommandHandler("convert_video", convert_video_start)], states={GET_VIDEO: [MessageHandler(filters.ALL, get_video)], GET_PROCESS_ACTION: [CallbackQueryHandler(video_processing_handler, pattern="^convert:")]}, **conv_defaults))
+    app.add_handler(ConversationHandler(
+        entry_points=[CommandHandler("convert_video", convert_video_start)],
+        states={
+            GET_VIDEO: [MessageHandler(filters.VIDEO | filters.Document.VIDEO, get_video)],
+            GET_PROCESS_ACTION: [CallbackQueryHandler(video_processing_handler, pattern="^convert:")],
+        },
+        **conv_defaults
+    ))
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CallbackQueryHandler(download_callback_handler, pattern="^dl_"))
 
     logger.info("Bot is running...")
     app.run_polling()
