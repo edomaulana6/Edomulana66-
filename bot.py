@@ -48,8 +48,7 @@ async def download_media(identifier: str, format_choice: str, effective_message,
     ydl_opts = {
         'outtmpl': os.path.join(download_dir, '%(id)s.%(ext)s'),
         'noplaylist': True,
-        'quiet': True,
-        'xff': 'ID'
+        'quiet': True
     }
 
     if format_choice == 'audio':
@@ -148,7 +147,6 @@ async def search_get_query(update: Update, context: CallbackContext):
             'default_search': 'ytsearch5',
             'quiet': True,
             'noplaylist': True,
-            'xff': 'ID',
             'match_filter': 'duration < 1800'
         }
         search_query = f"{update.message.text} {int(time.time())}"
@@ -181,8 +179,7 @@ async def song_start(update: Update, context: CallbackContext):
     return GET_SONG_TITLE
 
 async def song_get_title(update: Update, context: CallbackContext):
-    search_query = f"{update.message.text} {int(time.time())}"
-    await download_media(search_query, 'audio', update.message, search_prefix='ytmusic1')
+    await download_media(update.message.text, 'audio', update.message, search_prefix='ytmusic1')
     return ConversationHandler.END
 
 async def enhance_photo_start(update: Update, context: CallbackContext):
