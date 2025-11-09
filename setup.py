@@ -1,14 +1,10 @@
 import os
 
 def main():
-    print("--- 🤖 Bot Setup Assistant 🤖 ---")
-    if os.path.exists('.env'):
-        print("\n[⚠️] File .env sudah ada.")
-        if input("Timpa file? (yes/no): ").lower() not in ['yes', 'y']:
-            print("\nSetup dibatalkan.")
-            return
+    print("--- 🤖 Asisten Konfigurasi & Perbaikan Token 🤖 ---")
+    print("Skrip ini akan membuat atau menimpa file .env dengan token yang benar.")
 
-    token = input("\nSilakan masukkan Token Bot Telegram Anda:\n> ")
+    token = input("\nSilakan masukkan Token Bot Telegram Anda yang VALID:\n> ")
     if not token or len(token.split(':')) != 2:
         print("\n[❌] Error: Token tidak valid.")
         return
