@@ -137,12 +137,12 @@ async def download_get_url(update: Update, context: CallbackContext):
         return ConversationHandler.END
     return CHOOSE_FORMAT
 
-async def _execute_and_send_search(effective_message, context: CallbackContext):
+async def _execute_and_send_search(chat_id, context: CallbackContext):
     query = context.user_data.get('search_query')
     page = context.user_data.get('search_page', 1)
 
     if not query:
-        await effective_message.reply_text("Error: Sesi pencarian kedaluwarsa.")
+        await context.bot.send_message(chat_id=chat_id, text="Error: Sesi pencarian kedaluwarsa.")
         return
 
     num_to_fetch = page * 5
@@ -164,7 +164,7 @@ async def _execute_and_send_search(effective_message, context: CallbackContext):
         page_entries = all_entries[start_index:]
 
         if not page_entries:
-            await effective_message.reply_text("Tidak ada hasil lagi.")
+            await context.bot.send_message(chat_id=chat_id, text="Tidak ada hasil lagi.")
             return
 
         for entry in page_entries:
@@ -175,22 +175,23 @@ async def _execute_and_send_search(effective_message, context: CallbackContext):
 
             try:
                 if thumbnail_url:
-                    await effective_message.reply_photo(photo=thumbnail_url, caption=caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+                    await context.bot.send_photo(chat_id=chat_id, photo=thumbnail_url, caption=caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
                 else:
-                    await effective_message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+                    await context.bot.send_message(chat_id=chat_id, text=caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
             except Exception as e:
                 logger.warning(f"Could not send thumbnail for {entry['id']} ({thumbnail_url}): {e}. Sending as text.")
-                await effective_message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+                await context.bot.send_message(chat_id=chat_id, text=caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
         if len(all_entries) == num_to_fetch:
             keyboard = [[InlineKeyboardButton("Lebih Banyak", callback_data="search:more")]]
-            await effective_message.reply_text(
-                "Tampilkan lebih banyak?",
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="Tampilkan lebih banyak?",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
     except Exception as e:
-        await effective_message.reply_text(f"Gagal mencari: {e}")
+        await context.bot.send_message(chat_id=chat_id, text=f"Gagal mencari: {e}")
 
 async def search_start(update: Update, context: CallbackContext):
     await update.message.reply_text("Apa yang ingin dicari?")
@@ -199,7 +200,7 @@ async def search_start(update: Update, context: CallbackContext):
 async def search_get_query(update: Update, context: CallbackContext):
     context.user_data['search_query'] = update.message.text
     context.user_data['search_page'] = 1
-    await _execute_and_send_search(update.message, context)
+    await _execute_and_send_search(update.effective_chat.id, context)
     return CHOOSE_FORMAT
 
 async def song_start(update: Update, context: CallbackContext):
@@ -282,7 +283,7 @@ async def search_more_callback(update: Update, context: CallbackContext):
     await query.message.delete()
 
     context.user_data['search_page'] = context.user_data.get('search_page', 1) + 1
-    await _execute_and_send_search(query.message, context)
+    await _execute_and_send_search(query.message.chat_id, context)
     return CHOOSE_FORMAT
 
 # --- Callback Handlers ---
