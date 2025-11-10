@@ -137,24 +137,37 @@ async def download_get_url(update: Update, context: CallbackContext):
         return ConversationHandler.END
     return CHOOSE_FORMAT
 
-async def search_start(update: Update, context: CallbackContext):
-    await update.message.reply_text("Apa yang ingin dicari?")
-    return GET_SEARCH_QUERY
+async def _execute_and_send_search(effective_message, context: CallbackContext):
+    query = context.user_data.get('search_query')
+    page = context.user_data.get('search_page', 1)
 
-async def search_get_query(update: Update, context: CallbackContext):
+    if not query:
+        await effective_message.reply_text("Error: Sesi pencarian kedaluwarsa.")
+        return
+
+    num_to_fetch = page * 5
+    search_query = f"ytsearch{num_to_fetch}:{query}"
+
+    ydl_opts = {
+        'quiet': True,
+        'noplaylist': True,
+        'match_filter': 'duration < 1800'
+    }
+
     try:
-        ydl_opts = {
-            'default_search': 'ytsearch5',
-            'quiet': True,
-            'noplaylist': True,
-            'match_filter': 'duration < 1800'
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl: result = ydl.extract_info(update.message.text, download=False)
-        if not result.get('entries'):
-            await update.message.reply_text("Tidak ada hasil yang cocok dengan filter durasi (di bawah 30 menit).")
-            return ConversationHandler.END
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            result = ydl.extract_info(search_query, download=False)
 
-        for entry in result['entries'][:5]:
+        all_entries = result.get('entries', [])
+
+        start_index = (page - 1) * 5
+        page_entries = all_entries[start_index:]
+
+        if not page_entries:
+            await effective_message.reply_text("Tidak ada hasil lagi.")
+            return
+
+        for entry in page_entries:
             context.user_data[f"search_{entry['id']}"] = {'url': entry['webpage_url'], 'title': entry['title']}
             keyboard = [[InlineKeyboardButton("🎧 Audio", callback_data=f"dl_search:audio:{entry['id']}"), InlineKeyboardButton("🎬 Video", callback_data=f"dl_search:video:{entry['id']}")]]
             thumbnail_url = entry.get('thumbnail')
@@ -162,15 +175,31 @@ async def search_get_query(update: Update, context: CallbackContext):
 
             try:
                 if thumbnail_url:
-                    await update.message.reply_photo(photo=thumbnail_url, caption=caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+                    await effective_message.reply_photo(photo=thumbnail_url, caption=caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
                 else:
-                    await update.message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+                    await effective_message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
             except Exception as e:
                 logger.warning(f"Could not send thumbnail for {entry['id']} ({thumbnail_url}): {e}. Sending as text.")
-                await update.message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+                await effective_message.reply_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+
+        if len(all_entries) == num_to_fetch:
+            keyboard = [[InlineKeyboardButton("Lebih Banyak", callback_data="search:more")]]
+            await effective_message.reply_text(
+                "Tampilkan lebih banyak?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
     except Exception as e:
-        await update.message.reply_text(f"Gagal mencari: {e}")
-        return ConversationHandler.END
+        await effective_message.reply_text(f"Gagal mencari: {e}")
+
+async def search_start(update: Update, context: CallbackContext):
+    await update.message.reply_text("Apa yang ingin dicari?")
+    return GET_SEARCH_QUERY
+
+async def search_get_query(update: Update, context: CallbackContext):
+    context.user_data['search_query'] = update.message.text
+    context.user_data['search_page'] = 1
+    await _execute_and_send_search(update.message, context)
     return CHOOSE_FORMAT
 
 async def song_start(update: Update, context: CallbackContext):
@@ -246,6 +275,15 @@ async def get_video(update: Update, context: CallbackContext):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     return GET_PROCESS_ACTION
+
+async def search_more_callback(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+    await query.message.delete()
+
+    context.user_data['search_page'] = context.user_data.get('search_page', 1) + 1
+    await _execute_and_send_search(query.message, context)
+    return CHOOSE_FORMAT
 
 # --- Callback Handlers ---
 async def download_callback_handler(update: Update, context: CallbackContext):
@@ -333,7 +371,10 @@ def main():
         entry_points=[CommandHandler("search", search_start)],
         states={
             GET_SEARCH_QUERY: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_get_query)],
-            CHOOSE_FORMAT: [CallbackQueryHandler(download_callback_handler, pattern="^dl_search:")],
+            CHOOSE_FORMAT: [
+                CallbackQueryHandler(download_callback_handler, pattern="^dl_search:"),
+                CallbackQueryHandler(search_more_callback, pattern="^search:more$")
+            ],
         },
         **conv_defaults
     )
