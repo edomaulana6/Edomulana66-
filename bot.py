@@ -149,10 +149,9 @@ async def search_get_query(update: Update, context: CallbackContext):
             'noplaylist': True,
             'match_filter': 'duration < 1800'
         }
-        search_query = f"{update.message.text} {int(time.time())}"
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl: result = ydl.extract_info(search_query, download=False)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl: result = ydl.extract_info(update.message.text, download=False)
         if not result.get('entries'):
-            await update.message.reply_text("Tidak ada hasil yang cocok dengan filter regional.")
+            await update.message.reply_text("Tidak ada hasil yang cocok dengan filter durasi (di bawah 30 menit).")
             return ConversationHandler.END
 
         for entry in result['entries'][:5]:
