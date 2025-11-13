@@ -133,7 +133,8 @@ async def _execute_and_send_search(chat_id, context: CallbackContext):
             keyboard = [[InlineKeyboardButton("🎧 Audio", callback_data=f"dl_search:audio:{entry['id']}"), InlineKeyboardButton("🎬 Video", callback_data=f"dl_search:video:{entry['id']}")]]
             await context.bot.send_photo(chat_id=chat_id, photo=entry.get('thumbnail'), caption=f"*{entry['title']}*", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
-        if len(all_entries) == num_to_fetch:
+        # Selalu tawarkan "Lebih Banyak" jika ada hasil yang ditemukan di halaman ini
+        if page_entries:
             await context.bot.send_message(chat_id=chat_id, text="Tampilkan lebih banyak?", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Lebih Banyak", callback_data="search:more")]]))
     except Exception as e:
         await context.bot.send_message(chat_id=chat_id, text=f"❌ Gagal: Link tidak didukung atau error internal.")
@@ -157,20 +158,23 @@ async def song_start(update: Update, context: CallbackContext):
 async def song_get_title(update: Update, context: CallbackContext):
     status_message = await update.message.reply_text("⏳ Mencari lagu...")
     try:
-        ydl_opts = {'default_search': 'ytmusic1', 'quiet': True, 'noplaylist': True, 'match_filter': 'duration < 600'}
+        search_query = f"ytmusic1:{update.message.text}"
+        ydl_opts = {'quiet': True, 'noplaylist': True, 'match_filter': 'duration < 600'}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            result = ydl.extract_info(update.message.text, download=False)
+            result = ydl.extract_info(search_query, download=False)
             if not result.get('entries'):
                 await update.message.reply_text("Tidak ada lagu yang cocok dengan filter durasi.")
+                if status_message: await status_message.delete()
                 return ConversationHandler.END
 
         video_url = result['entries'][0]['webpage_url']
-        await status_message.delete()
+        if status_message: await status_message.delete()
         await download_media(video_url, 'audio', update.message)
     except Exception as e:
+        logger.error(f"Song search failed for '{update.message.text}': {e}", exc_info=True)
+        if status_message: await status_message.delete()
         await update.message.reply_text(f"❌ Gagal: Terjadi error saat mencari lagu.")
-    finally:
-        if status_message and not status_message._is_deleted: await status_message.delete()
+
     return ConversationHandler.END
 
 # ... (sisa fungsi enhance_photo dan convert_video tetap sama) ...
@@ -213,16 +217,25 @@ async def download_callback_handler(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
     data_type, action, *rest = query.data.split(':')
+
     info_key = 'url_info' if data_type == 'dl_url' else f"search_{rest[0]}"
     info = context.user_data.get(info_key, {})
     identifier = info.get('url')
+
     if not identifier:
-        await query.edit_message_text("Error: Sesi kedaluwarsa.")
+        await query.message.reply_text("Error: Sesi kedaluwarsa. Mulai pencarian baru.")
         return ConversationHandler.END
-    await query.edit_message_caption(caption=f"Mengunduh *{info.get('title', '')}*...", reply_markup=None, parse_mode='Markdown')
+
+    original_caption = query.message.caption
+    await query.edit_message_caption(caption=f"⏳ Mengunduh *{info.get('title', '')}*...", parse_mode='Markdown')
+
     await download_media(identifier, action, query.message)
-    await query.message.delete()
-    return ConversationHandler.END
+
+    # Kembalikan caption asli agar tombol lain bisa digunakan
+    await query.edit_message_caption(caption=original_caption, reply_markup=query.message.reply_markup, parse_mode='Markdown')
+
+    # Tetap dalam state yang sama untuk mengizinkan unduhan lain
+    return CHOOSE_FORMAT
 async def photo_enhancement_handler(update: Update, context: CallbackContext):
     # ...
     return ConversationHandler.END
