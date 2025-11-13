@@ -264,7 +264,15 @@ def main():
         **conv_defaults
     ))
     app.add_handler(ConversationHandler(entry_points=[CommandHandler("song", song_start)], states={GET_SONG_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, song_get_title)]}, **conv_defaults))
-    # ... (sisa handler)
+    app.add_handler(ConversationHandler(entry_points=[CommandHandler("enhance_photo", enhance_photo_start)], states={GET_PHOTO: [MessageHandler(filters.PHOTO | filters.Document.IMAGE, get_photo)], GET_ENHANCEMENT: [CallbackQueryHandler(photo_enhancement_handler, pattern="^enhance:")]}, **conv_defaults))
+    app.add_handler(ConversationHandler(
+        entry_points=[CommandHandler("convert_video", convert_video_start)],
+        states={
+            GET_VIDEO: [MessageHandler(filters.VIDEO | filters.Document.VIDEO, get_video)],
+            GET_PROCESS_ACTION: [CallbackQueryHandler(video_processing_handler, pattern="^convert:")]
+        },
+        **conv_defaults
+    ))
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
