@@ -111,35 +111,80 @@ async def download_get_url(update: Update, context: CallbackContext):
         await download_media(url, 'video', update.message)
     return CHOOSE_FORMAT
 
-async def _execute_and_send_search(chat_id, context: CallbackContext):
+async def _execute_and_send_search(chat_id, context: CallbackContext, is_new_search=False):
     query = context.user_data.get('search_query')
-    page = context.user_data.get('search_page', 1)
     status_message = None
     try:
-        status_message = await context.bot.send_message(chat_id=chat_id, text="⏳ Mencari...")
-        num_to_fetch = page * 5
-        search_query = f"ytsearch{num_to_fetch}:{query}"
-        ydl_opts = {'quiet': True, 'noplaylist': True, 'match_filter': 'duration < 1800'}
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl: result = ydl.extract_info(search_query, download=False)
+        if is_new_search:
+            status_message = await context.bot.send_message(chat_id=chat_id, text="⏳ Mencari 250 video...")
+            search_query = f"ytsearch250:{query}"
+            ydl_opts = {'quiet': True, 'noplaylist': True, 'match_filter': 'duration < 600', 'extract_flat': True}
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                result = ydl.extract_info(search_query, download=False)
 
-        all_entries = result.get('entries', [])
-        page_entries = all_entries[(page - 1) * 5:]
-        if not page_entries:
-            await context.bot.send_message(chat_id=chat_id, text="Tidak ada hasil lagi.")
-            return
+            entries = result.get('entries', [])
+            if not entries:
+                await context.bot.send_message(chat_id=chat_id, text="Tidak ada hasil yang cocok dengan filter durasi (di bawah 10 menit).")
+                context.user_data['search_results'] = []
+                return
 
-        for entry in page_entries:
-            context.user_data[f"search_{entry['id']}"] = {'url': entry['webpage_url'], 'title': entry['title']}
-            keyboard = [[InlineKeyboardButton("🎧 Audio", callback_data=f"dl_search:audio:{entry['id']}"), InlineKeyboardButton("🎬 Video", callback_data=f"dl_search:video:{entry['id']}")]]
-            await context.bot.send_photo(chat_id=chat_id, photo=entry.get('thumbnail'), caption=f"*{entry['title']}*", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-
-        # Selalu tawarkan "Lebih Banyak" jika ada hasil yang ditemukan di halaman ini
-        if page_entries:
-            await context.bot.send_message(chat_id=chat_id, text="Tampilkan lebih banyak?", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Lebih Banyak", callback_data="search:more")]]))
+            context.user_data['search_results'] = entries
+            context.user_data['search_page'] = 0
     except Exception as e:
-        await context.bot.send_message(chat_id=chat_id, text=f"❌ Gagal: Link tidak didukung atau error internal.")
+        logger.error(f"Deep search failed for '{query}': {e}", exc_info=True)
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ Gagal: Terjadi error saat melakukan pencarian mendalam.")
     finally:
         if status_message: await status_message.delete()
+
+async def _display_search_page(update: Update, context: CallbackContext):
+    """Helper function to display a specific search result page."""
+    results = context.user_data.get('search_results', [])
+    page = context.user_data.get('search_page', 0)
+
+    if not results:
+        # This case should ideally be handled before calling this function
+        return
+
+    entry = results[page]
+    video_id = entry['id']
+    title = entry['title']
+    duration_seconds = entry.get('duration', 0)
+    minutes = int(duration_seconds // 60)
+    seconds = int(duration_seconds % 60)
+    duration_str = f"{minutes:02d}:{seconds:02d}"
+
+    caption = f"Durasi: {duration_str} - *{title}*"
+
+    # --- Keyboard ---
+    keyboard = []
+
+    # Navigasi
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("<<", callback_data="search:prev"))
+    nav_buttons.append(InlineKeyboardButton(f"Halaman {page + 1}/{len(results)}", callback_data="search:noop")) # No-op
+    if page < len(results) - 1:
+        nav_buttons.append(InlineKeyboardButton(">>", callback_data="search:next"))
+    keyboard.append(nav_buttons)
+
+    # Unduhan
+    download_buttons = [
+        InlineKeyboardButton("🎧 Audio", callback_data=f"dl_search:audio:{video_id}"),
+        InlineKeyboardButton("🎬 Video", callback_data=f"dl_search:video:{video_id}")
+    ]
+    keyboard.append(download_buttons)
+
+    # Batal
+    keyboard.append([InlineKeyboardButton("Batalkan Pencarian", callback_data="search:cancel")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # Jika ini adalah pesan callback, edit. Jika baru, kirim.
+    query = update.callback_query
+    if query:
+        await query.edit_message_text(text=caption, reply_markup=reply_markup, parse_mode='Markdown')
+    else:
+        await update.message.reply_text(text=caption, reply_markup=reply_markup, parse_mode='Markdown')
 
 async def search_start(update: Update, context: CallbackContext):
     await update.message.reply_text("Apa yang ingin dicari?")
@@ -147,8 +192,24 @@ async def search_start(update: Update, context: CallbackContext):
 
 async def search_get_query(update: Update, context: CallbackContext):
     context.user_data['search_query'] = update.message.text
-    context.user_data['search_page'] = 1
-    await _execute_and_send_search(update.effective_chat.id, context)
+    await _execute_and_send_search(update.effective_chat.id, context, is_new_search=True)
+    if context.user_data.get('search_results'):
+        await _display_search_page(update, context)
+    return CHOOSE_FORMAT
+
+async def search_navigation_callback(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+
+    action = query.data.split(':')[-1]
+    page = context.user_data.get('search_page', 0)
+
+    if action == 'next':
+        context.user_data['search_page'] = page + 1
+    elif action == 'prev':
+        context.user_data['search_page'] = page - 1
+
+    await _display_search_page(update, context)
     return CHOOSE_FORMAT
 
 async def song_start(update: Update, context: CallbackContext):
@@ -206,35 +267,24 @@ async def get_video(update: Update, context: CallbackContext):
     ]
     await update.message.reply_text("Pilih tindakan:", reply_markup=InlineKeyboardMarkup(keyboard))
     return GET_PROCESS_ACTION
-async def search_more_callback(update: Update, context: CallbackContext):
-    query = update.callback_query
-    await query.answer()
-    await query.message.delete()
-    context.user_data['search_page'] = context.user_data.get('search_page', 1) + 1
-    await _execute_and_send_search(query.message.chat_id, context)
-    return CHOOSE_FORMAT
 async def download_callback_handler(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
-    data_type, action, *rest = query.data.split(':')
+    data_type, action, video_id = query.data.split(':')
 
-    info_key = 'url_info' if data_type == 'dl_url' else f"search_{rest[0]}"
-    info = context.user_data.get(info_key, {})
-    identifier = info.get('url')
+    results = context.user_data.get('search_results', [])
+    entry = next((item for item in results if item["id"] == video_id), None)
 
-    if not identifier:
-        await query.message.reply_text("Error: Sesi kedaluwarsa. Mulai pencarian baru.")
-        return ConversationHandler.END
+    if not entry:
+        await query.message.reply_text("Error: Hasil tidak ditemukan atau sesi kedaluwarsa.")
+        return CHOOSE_FORMAT # Tetap di state
 
-    original_caption = query.message.caption
-    await query.edit_message_caption(caption=f"⏳ Mengunduh *{info.get('title', '')}*...", parse_mode='Markdown')
+    identifier = entry.get('url') or f"https://www.youtube.com/watch?v={video_id}"
 
+    await query.message.reply_text(f"⏳ Memulai unduhan untuk *{entry.get('title')}*...", parse_mode='Markdown')
     await download_media(identifier, action, query.message)
 
-    # Kembalikan caption asli agar tombol lain bisa digunakan
-    await query.edit_message_caption(caption=original_caption, reply_markup=query.message.reply_markup, parse_mode='Markdown')
-
-    # Tetap dalam state yang sama untuk mengizinkan unduhan lain
+    # Tidak mengakhiri conversation, agar bisa unduh yang lain dari halaman yang sama
     return CHOOSE_FORMAT
 async def photo_enhancement_handler(update: Update, context: CallbackContext):
     # ...
@@ -259,7 +309,12 @@ def main():
         entry_points=[CommandHandler("search", search_start)],
         states={
             GET_SEARCH_QUERY: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_get_query)],
-            CHOOSE_FORMAT: [CallbackQueryHandler(download_callback_handler, pattern="^dl_search:"), CallbackQueryHandler(search_more_callback, pattern="^search:more$")]
+            CHOOSE_FORMAT: [
+                CallbackQueryHandler(download_callback_handler, pattern="^dl_search:"),
+                CallbackQueryHandler(search_navigation_callback, pattern="^search:(next|prev)$"),
+                CallbackQueryHandler(cancel, pattern="^search:cancel$"),
+                CallbackQueryHandler(lambda u, c: u.callback_query.answer(), pattern="^search:noop$"),
+            ],
         },
         **conv_defaults
     ))
