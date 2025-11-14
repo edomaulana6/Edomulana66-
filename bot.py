@@ -127,12 +127,20 @@ async def _execute_and_send_search(chat_id, context: CallbackContext, is_new_sea
                 result = ydl.extract_info(search_query, download=False)
 
             entries = result.get('entries', [])
-            if not entries:
+
+            # --- Lapisan Filter Manual ---
+            # Memastikan setiap hasil memiliki durasi dan < 10 menit.
+            filtered_entries = [
+                entry for entry in entries
+                if entry.get('duration') and entry['duration'] < 600
+            ]
+
+            if not filtered_entries:
                 await context.bot.send_message(chat_id=chat_id, text="Tidak ada hasil yang cocok dengan filter durasi (di bawah 10 menit).")
                 context.user_data['search_results'] = []
                 return
 
-            context.user_data['search_results'] = entries
+            context.user_data['search_results'] = filtered_entries
             context.user_data['search_page'] = 0
     except Exception as e:
         logger.error(f"Deep search failed for '{query}': {e}", exc_info=True)
