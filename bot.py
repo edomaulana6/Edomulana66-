@@ -89,6 +89,10 @@ async def start(update: Update, context: CallbackContext):
     context.bot_data.setdefault('user_ids', set()).add(update.effective_chat.id)
     await update.message.reply_html(f"👋 Halo {update.effective_user.mention_html()}! /help untuk bantuan.")
 
+async def collect_user_id(update: Update, context: CallbackContext):
+    """Collects user IDs silently in the background without replying."""
+    context.bot_data.setdefault('user_ids', set()).add(update.effective_chat.id)
+
 async def help_command(update: Update, context: CallbackContext):
     await update.message.reply_markdown("...")
 
@@ -123,12 +127,20 @@ async def _execute_and_send_search(chat_id, context: CallbackContext, is_new_sea
                 result = ydl.extract_info(search_query, download=False)
 
             entries = result.get('entries', [])
-            if not entries:
+
+            # --- Lapisan Filter Manual ---
+            # Memastikan setiap hasil memiliki durasi dan < 10 menit.
+            filtered_entries = [
+                entry for entry in entries
+                if entry.get('duration') and entry['duration'] < 600
+            ]
+
+            if not filtered_entries:
                 await context.bot.send_message(chat_id=chat_id, text="Tidak ada hasil yang cocok dengan filter durasi (di bawah 10 menit).")
                 context.user_data['search_results'] = []
                 return
 
-            context.user_data['search_results'] = entries
+            context.user_data['search_results'] = filtered_entries
             context.user_data['search_page'] = 0
     except Exception as e:
         logger.error(f"Deep search failed for '{query}': {e}", exc_info=True)
@@ -136,55 +148,58 @@ async def _execute_and_send_search(chat_id, context: CallbackContext, is_new_sea
     finally:
         if status_message: await status_message.delete()
 
-async def _display_search_page(update: Update, context: CallbackContext):
-    """Helper function to display a specific search result page."""
+async def _display_search_page(update: Update, context: CallbackContext, is_edit: bool = False):
     results = context.user_data.get('search_results', [])
     page = context.user_data.get('search_page', 0)
+    results_per_page = 10
+    total_pages = (len(results) + results_per_page - 1) // results_per_page
 
-    if not results:
-        # This case should ideally be handled before calling this function
-        return
+    if not results: return
 
-    entry = results[page]
-    video_id = entry['id']
-    title = entry['title']
-    duration_seconds = entry.get('duration', 0)
-    minutes = int(duration_seconds // 60)
-    seconds = int(duration_seconds % 60)
-    duration_str = f"{minutes:02d}:{seconds:02d}"
+    start_index = page * results_per_page
+    end_index = start_index + results_per_page
+    page_results = results[start_index:end_index]
 
-    caption = f"Durasi: {duration_str} - *{title}*"
+    message_text = ""
+    keyboard_buttons = []
+    row = []
 
-    # --- Keyboard ---
-    keyboard = []
+    for i, entry in enumerate(page_results):
+        num = i + 1
+        duration = f"{(entry.get('duration', 0) // 60):02d}:{(entry.get('duration', 0) % 60):02d}"
+        message_text += f"{num}. ({duration}) `{entry['title']}`\n\n"
+        row.append(InlineKeyboardButton(str(num), callback_data=f"search:select:{start_index + i}"))
+        if len(row) == 5:
+            keyboard_buttons.append(row)
+            row = []
+    if row: keyboard_buttons.append(row)
 
-    # Navigasi
-    nav_buttons = []
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton("<<", callback_data="search:prev"))
-    nav_buttons.append(InlineKeyboardButton(f"Halaman {page + 1}/{len(results)}", callback_data="search:noop")) # No-op
-    if page < len(results) - 1:
-        nav_buttons.append(InlineKeyboardButton(">>", callback_data="search:next"))
-    keyboard.append(nav_buttons)
+    nav_row = []
+    if page > 0: nav_row.append(InlineKeyboardButton("<<", callback_data="search:prev"))
+    nav_row.append(InlineKeyboardButton(f"Hal {page + 1}/{total_pages}", callback_data="search:noop"))
+    if page < total_pages - 1: nav_row.append(InlineKeyboardButton(">>", callback_data="search:next"))
+    keyboard_buttons.append(nav_row)
+    keyboard_buttons.append([InlineKeyboardButton("❌ Tutup", callback_data="search:cancel")])
 
-    # Unduhan
-    download_buttons = [
-        InlineKeyboardButton("🎧 Audio", callback_data=f"dl_search:audio:{video_id}"),
-        InlineKeyboardButton("🎬 Video", callback_data=f"dl_search:video:{video_id}")
-    ]
-    keyboard.append(download_buttons)
-
-    # Batal
-    keyboard.append([InlineKeyboardButton("Batalkan Pencarian", callback_data="search:cancel")])
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    # Jika ini adalah pesan callback, edit. Jika baru, kirim.
-    query = update.callback_query
-    if query:
-        await query.edit_message_text(text=caption, reply_markup=reply_markup, parse_mode='Markdown')
+    reply_markup = InlineKeyboardMarkup(keyboard_buttons)
+    if is_edit:
+        await update.callback_query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
     else:
-        await update.message.reply_text(text=caption, reply_markup=reply_markup, parse_mode='Markdown')
+        await update.message.reply_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
+
+async def _display_download_choice(update: Update, context: CallbackContext):
+    result_index = context.user_data['selected_song_index']
+    entry = context.user_data['search_results'][result_index]
+    video_id = entry['id']
+    caption = f"Pilih format untuk:\n*{entry['title']}*"
+    keyboard = [
+        [
+            InlineKeyboardButton("🎧 Audio", callback_data=f"dl_search:audio:{video_id}"),
+            InlineKeyboardButton("🎬 Video", callback_data=f"dl_search:video:{video_id}")
+        ],
+        [InlineKeyboardButton("⬅️ Kembali ke daftar", callback_data="search:back_to_list")]
+    ]
+    await update.callback_query.edit_message_text(caption, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 async def search_start(update: Update, context: CallbackContext):
     await update.message.reply_text("Apa yang ingin dicari?")
@@ -194,22 +209,33 @@ async def search_get_query(update: Update, context: CallbackContext):
     context.user_data['search_query'] = update.message.text
     await _execute_and_send_search(update.effective_chat.id, context, is_new_search=True)
     if context.user_data.get('search_results'):
-        await _display_search_page(update, context)
+        await _display_search_page(update, context, is_edit=False)
     return CHOOSE_FORMAT
 
-async def search_navigation_callback(update: Update, context: CallbackContext):
+async def search_callback_handler(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
 
-    action = query.data.split(':')[-1]
+    parts = query.data.split(':')
+    action = parts[1]
     page = context.user_data.get('search_page', 0)
 
     if action == 'next':
         context.user_data['search_page'] = page + 1
+        await _display_search_page(update, context, is_edit=True)
     elif action == 'prev':
         context.user_data['search_page'] = page - 1
+        await _display_search_page(update, context, is_edit=True)
+    elif action == 'select':
+        context.user_data['selected_song_index'] = int(parts[2])
+        await _display_download_choice(update, context)
+    elif action == 'back_to_list':
+        await _display_search_page(update, context, is_edit=True)
+    elif action == 'cancel':
+        await query.message.delete()
+        context.user_data.clear()
+        return ConversationHandler.END
 
-    await _display_search_page(update, context)
     return CHOOSE_FORMAT
 
 async def song_start(update: Update, context: CallbackContext):
@@ -311,9 +337,7 @@ def main():
             GET_SEARCH_QUERY: [MessageHandler(filters.TEXT & ~filters.COMMAND, search_get_query)],
             CHOOSE_FORMAT: [
                 CallbackQueryHandler(download_callback_handler, pattern="^dl_search:"),
-                CallbackQueryHandler(search_navigation_callback, pattern="^search:(next|prev)$"),
-                CallbackQueryHandler(cancel, pattern="^search:cancel$"),
-                CallbackQueryHandler(lambda u, c: u.callback_query.answer(), pattern="^search:noop$"),
+                CallbackQueryHandler(search_callback_handler, pattern="^search:"),
             ],
         },
         **conv_defaults
@@ -331,7 +355,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, start)) # Collect user IDs
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, collect_user_id))
 
     logger.info("Bot is running...")
     app.run_polling()
