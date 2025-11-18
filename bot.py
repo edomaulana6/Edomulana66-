@@ -166,7 +166,8 @@ async def _display_search_page(update: Update, context: CallbackContext, is_edit
 
     for i, entry in enumerate(page_results):
         num = i + 1
-        duration = f"{(entry.get('duration', 0) // 60):02d}:{(entry.get('duration', 0) % 60):02d}"
+        duration_seconds = int(entry.get('duration', 0))
+        duration = f"{(duration_seconds // 60):02d}:{(duration_seconds % 60):02d}"
         message_text += f"{num}. ({duration}) `{entry['title']}`\n\n"
         row.append(InlineKeyboardButton(str(num), callback_data=f"search:select:{start_index + i}"))
         if len(row) == 5:
