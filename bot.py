@@ -4,6 +4,7 @@ import re
 import uuid
 import sys
 import shutil
+import math
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -137,49 +138,58 @@ async def _execute_and_send_search(chat_id, context: CallbackContext, is_new_sea
         if status_message: await status_message.delete()
 
 async def _display_search_page(update: Update, context: CallbackContext):
-    """Helper function to display a specific search result page."""
+    RESULTS_PER_PAGE = 10
     results = context.user_data.get('search_results', [])
     page = context.user_data.get('search_page', 0)
 
     if not results:
-        # This case should ideally be handled before calling this function
         return
 
-    entry = results[page]
-    video_id = entry['id']
-    title = entry['title']
-    duration_seconds = entry.get('duration', 0)
-    minutes = int(duration_seconds // 60)
-    seconds = int(duration_seconds % 60)
-    duration_str = f"{minutes:02d}:{seconds:02d}"
+    start_index = page * RESULTS_PER_PAGE
+    end_index = start_index + RESULTS_PER_PAGE
+    page_results = results[start_index:end_index]
 
-    caption = f"Durasi: {duration_str} - *{title}*"
+    caption_lines = []
+    for i, entry in enumerate(page_results, start=1):
+        duration_seconds = entry.get('duration', 0)
+        minutes = int(duration_seconds // 60)
+        seconds = int(duration_seconds % 60)
+        duration_str = f"{minutes:02d}:{seconds:02d}"
+        caption_lines.append(f"*{i}.* `{duration_str}` - {entry['title']}")
 
-    # --- Keyboard ---
+    caption = "\n".join(caption_lines)
+    total_pages = math.ceil(len(results) / RESULTS_PER_PAGE)
+
     keyboard = []
+    # Membuat 2 kolom tombol untuk setiap lagu
+    for i in range(0, len(page_results), 2):
+        row = []
+        # Lagu pertama dalam baris
+        video_id1 = page_results[i]['id']
+        row.extend([
+            InlineKeyboardButton(f"🎧 {i+1}", callback_data=f"dl_search:audio:{video_id1}"),
+            InlineKeyboardButton(f"🎬 {i+1}", callback_data=f"dl_search:video:{video_id1}")
+        ])
+        # Jika ada lagu kedua untuk baris ini
+        if i + 1 < len(page_results):
+            video_id2 = page_results[i+1]['id']
+            row.extend([
+                InlineKeyboardButton(f"🎧 {i+2}", callback_data=f"dl_search:audio:{video_id2}"),
+                InlineKeyboardButton(f"🎬 {i+2}", callback_data=f"dl_search:video:{video_id2}")
+            ])
+        keyboard.append(row)
 
-    # Navigasi
+
     nav_buttons = []
     if page > 0:
         nav_buttons.append(InlineKeyboardButton("<<", callback_data="search:prev"))
-    nav_buttons.append(InlineKeyboardButton(f"Halaman {page + 1}/{len(results)}", callback_data="search:noop")) # No-op
-    if page < len(results) - 1:
+    nav_buttons.append(InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="search:noop"))
+    if page < total_pages - 1:
         nav_buttons.append(InlineKeyboardButton(">>", callback_data="search:next"))
     keyboard.append(nav_buttons)
-
-    # Unduhan
-    download_buttons = [
-        InlineKeyboardButton("🎧 Audio", callback_data=f"dl_search:audio:{video_id}"),
-        InlineKeyboardButton("🎬 Video", callback_data=f"dl_search:video:{video_id}")
-    ]
-    keyboard.append(download_buttons)
-
-    # Batal
     keyboard.append([InlineKeyboardButton("Batalkan Pencarian", callback_data="search:cancel")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-
-    # Jika ini adalah pesan callback, edit. Jika baru, kirim.
     query = update.callback_query
     if query:
         await query.edit_message_text(text=caption, reply_markup=reply_markup, parse_mode='Markdown')
