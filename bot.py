@@ -108,12 +108,30 @@ async def download_get_url(update: Update, context: CallbackContext):
         return GET_URL
 
     try:
-        with yt_dlp.YoutubeDL({'quiet': True, 'noplaylist': True}) as ydl: info = ydl.extract_info(url, download=False)
-        context.user_data['url_info'] = {'url': url, 'title': info.get('title', 'Tanpa Judul')}
-        keyboard = [[InlineKeyboardButton("🎧 Audio", callback_data=f"dl_url:audio"), InlineKeyboardButton("🎬 Video", callback_data=f"dl_url:video")]]
-        await update.message.reply_photo(photo=info.get('thumbnail'), caption=f"Pilih format untuk:\n*{info.get('title')}*", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-    except Exception:
+        with yt_dlp.YoutubeDL({'quiet': True, 'noplaylist': True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+
+        video_id = info.get('id')
+        title = info.get('title', 'Tanpa Judul')
+        thumbnail = info.get('thumbnail')
+
+        context.user_data['url_info'] = {'url': url, 'title': title, 'id': video_id}
+
+        keyboard = [[
+            InlineKeyboardButton("🎧 Audio", callback_data=f"dl_url:audio:{video_id}"),
+            InlineKeyboardButton("🎬 Video", callback_data=f"dl_url:video:{video_id}")
+        ]]
+
+        await update.message.reply_photo(
+            photo=thumbnail,
+            caption=f"Pilih format untuk:\n*{title}*",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Gagal memproses URL {url}: {e}", exc_info=True)
         await download_media(url, 'video', update.message)
+
     return CHOOSE_FORMAT
 
 async def _display_search_page(update: Update, context: CallbackContext, query: str, page: int, is_edit: bool = False):
@@ -125,7 +143,7 @@ async def _display_search_page(update: Update, context: CallbackContext, query: 
         try:
             await update.callback_query.edit_message_text(status_message_text, reply_markup=None)
         except Exception:
-            pass # Pesan mungkin tidak berubah, tidak apa-apa
+            pass
     else:
         status_message = await effective_message.reply_text(status_message_text)
 
@@ -151,14 +169,15 @@ async def _display_search_page(update: Update, context: CallbackContext, query: 
         has_next_page = len(all_entries) > end_index
         page_results = all_entries[start_index:end_index]
 
-        encoded_query = base64.b64encode(query.encode('utf-8')).decode('utf-8')
-        message_text = f"Hasil pencarian untuk: `{query}` (Hal {page + 1})\n\n"
+        # Simpan kata kunci di dalam teks pesan
+        message_text = f"Hasil pencarian untuk: `{query}`\n\n"
         keyboard_buttons, row = [], []
         for i, entry in enumerate(page_results):
             num_on_page = i + 1
-            duration = f"{(int(entry['duration']) // 60):02d}:{(int(entry['duration']) % 60):02d}"
+            duration = f"{(int(entry.get('duration', 0)) // 60):02d}:{(int(entry.get('duration', 0)) % 60):02d}"
             message_text += f"{num_on_page}. ({duration}) `{entry['title']}`\n\n"
-            row.append(InlineKeyboardButton(str(num_on_page), callback_data=f"search:select:{entry['id']}:{page}:{encoded_query}"))
+            # Sertakan nomor halaman untuk tombol kembali
+            row.append(InlineKeyboardButton(str(num_on_page), callback_data=f"search:select:{entry['id']}:{page}"))
             if len(row) >= 5:
                 keyboard_buttons.append(row)
                 row = []
@@ -166,10 +185,10 @@ async def _display_search_page(update: Update, context: CallbackContext, query: 
 
         nav_row = []
         if page > 0:
-            nav_row.append(InlineKeyboardButton("<<", callback_data=f"search:page:{page - 1}:{encoded_query}"))
+            nav_row.append(InlineKeyboardButton("<<", callback_data=f"search:page:{page - 1}"))
         nav_row.append(InlineKeyboardButton(f"Hal {page + 1}", callback_data="search:noop"))
         if has_next_page:
-            nav_row.append(InlineKeyboardButton(">>", callback_data=f"search:page:{page + 1}:{encoded_query}"))
+            nav_row.append(InlineKeyboardButton(">>", callback_data=f"search:page:{page + 1}"))
         keyboard_buttons.append(nav_row)
         keyboard_buttons.append([InlineKeyboardButton("❌ Tutup", callback_data="search:cancel")])
 
@@ -187,8 +206,8 @@ async def _display_search_page(update: Update, context: CallbackContext, query: 
         else: await effective_message.reply_text(error_message)
 
 
-async def _display_download_choice_search(update: Update, context: CallbackContext, video_id: str, page: int, encoded_query: str):
-    """Displays stateless download choices (Audio/Video) for a selected search result."""
+async def _display_download_choice_search(update: Update, context: CallbackContext, video_id: str, page: int):
+    """Displays download choices and a stateless 'Back' button."""
     try:
         with yt_dlp.YoutubeDL({'quiet': True, 'noplaylist': True}) as ydl:
             info = ydl.extract_info(video_id, download=False)
@@ -201,7 +220,7 @@ async def _display_download_choice_search(update: Update, context: CallbackConte
                 InlineKeyboardButton("🎧 Audio", callback_data=f"dl_search:audio:{video_id}"),
                 InlineKeyboardButton("🎬 Video", callback_data=f"dl_search:video:{video_id}")
             ],
-            [InlineKeyboardButton("⬅️ Kembali", callback_data=f"search:page:{page}:{encoded_query}")]
+            [InlineKeyboardButton("⬅️ Kembali", callback_data=f"search:page:{page}")]
         ]
 
         await update.callback_query.edit_message_text(
@@ -210,7 +229,7 @@ async def _display_download_choice_search(update: Update, context: CallbackConte
             parse_mode='Markdown'
         )
     except Exception as e:
-        logger.error(f"Failed to display stateless download choice for video_id '{video_id}': {e}", exc_info=True)
+        logger.error(f"Failed to display download choice for video_id '{video_id}': {e}", exc_info=True)
         await update.callback_query.edit_message_text("❌ Terjadi kesalahan saat mengambil detail video.")
 
     return CHOOSE_FORMATimport logging
@@ -340,7 +359,7 @@ async def _display_search_page(update: Update, context: CallbackContext, query: 
         try:
             await update.callback_query.edit_message_text(status_message_text, reply_markup=None)
         except Exception:
-            pass # Pesan mungkin tidak berubah, tidak apa-apa
+            pass
     else:
         status_message = await effective_message.reply_text(status_message_text)
 
@@ -366,14 +385,15 @@ async def _display_search_page(update: Update, context: CallbackContext, query: 
         has_next_page = len(all_entries) > end_index
         page_results = all_entries[start_index:end_index]
 
-        encoded_query = base64.b64encode(query.encode('utf-8')).decode('utf-8')
-        message_text = f"Hasil pencarian untuk: `{query}` (Hal {page + 1})\n\n"
+        # Simpan kata kunci di dalam teks pesan
+        message_text = f"Hasil pencarian untuk: `{query}`\n\n"
         keyboard_buttons, row = [], []
         for i, entry in enumerate(page_results):
             num_on_page = i + 1
-            duration = f"{(int(entry['duration']) // 60):02d}:{(int(entry['duration']) % 60):02d}"
+            duration = f"{(int(entry.get('duration', 0)) // 60):02d}:{(int(entry.get('duration', 0)) % 60):02d}"
             message_text += f"{num_on_page}. ({duration}) `{entry['title']}`\n\n"
-            row.append(InlineKeyboardButton(str(num_on_page), callback_data=f"search:select:{entry['id']}:{page}:{encoded_query}"))
+            # Sertakan nomor halaman untuk tombol kembali
+            row.append(InlineKeyboardButton(str(num_on_page), callback_data=f"search:select:{entry['id']}:{page}"))
             if len(row) >= 5:
                 keyboard_buttons.append(row)
                 row = []
@@ -381,10 +401,10 @@ async def _display_search_page(update: Update, context: CallbackContext, query: 
 
         nav_row = []
         if page > 0:
-            nav_row.append(InlineKeyboardButton("<<", callback_data=f"search:page:{page - 1}:{encoded_query}"))
+            nav_row.append(InlineKeyboardButton("<<", callback_data=f"search:page:{page - 1}"))
         nav_row.append(InlineKeyboardButton(f"Hal {page + 1}", callback_data="search:noop"))
         if has_next_page:
-            nav_row.append(InlineKeyboardButton(">>", callback_data=f"search:page:{page + 1}:{encoded_query}"))
+            nav_row.append(InlineKeyboardButton(">>", callback_data=f"search:page:{page + 1}"))
         keyboard_buttons.append(nav_row)
         keyboard_buttons.append([InlineKeyboardButton("❌ Tutup", callback_data="search:cancel")])
 
@@ -407,9 +427,12 @@ async def search_start(update: Update, context: CallbackContext):
 
 async def search_get_query(update: Update, context: CallbackContext):
     query = update.message.text
-    context.user_data.clear() # Hapus state lama
     await _display_search_page(update, context, query=query, page=0, is_edit=False)
     return CHOOSE_FORMAT
+
+def _extract_query_from_message(text: str) -> str or None:
+    match = re.search(r"Hasil pencarian untuk: `(.*?)`", text)
+    return match.group(1) if match else None
 
 async def search_callback_handler(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -418,21 +441,22 @@ async def search_callback_handler(update: Update, context: CallbackContext):
     parts = query.data.split(':')
     action = parts[1]
 
+    search_query = _extract_query_from_message(query.message.text_markdown)
+    if not search_query:
+        await query.edit_message_text("❌ Error: Tidak dapat menemukan kata kunci pencarian asli. Sesi mungkin terlalu lama.")
+        return ConversationHandler.END
+
     if action == 'page':
         page = int(parts[2])
-        encoded_query = parts[3]
-        search_query = base64.b64decode(encoded_query).decode('utf-8')
         await _display_search_page(update, context, query=search_query, page=page, is_edit=True)
 
     elif action == 'select':
         video_id = parts[2]
         page = int(parts[3])
-        encoded_query = parts[4]
-        await _display_download_choice_search(update, context, video_id, page, encoded_query)
+        await _display_download_choice_search(update, context, video_id, page)
 
     elif action == 'cancel':
         await query.message.delete()
-        context.user_data.clear()
         return ConversationHandler.END
 
     return CHOOSE_FORMAT
@@ -502,7 +526,6 @@ async def download_callback_handler(update: Update, context: CallbackContext):
     identifier, title = video_id, "media"
 
     if data_type == 'dl_url':
-        # Handler untuk /download: stateful, akhiri setelah selesai
         url_info = context.user_data.get('url_info')
         if not url_info or url_info.get('id') != video_id:
             await query.message.edit_text("Error: Sesi unduhan URL kedaluwarsa. Silakan mulai lagi /download.")
@@ -513,7 +536,6 @@ async def download_callback_handler(update: Update, context: CallbackContext):
         return ConversationHandler.END
 
     elif data_type == 'dl_search':
-        # Handler untuk /search: stateless, jangan akhiri sesi
         try:
             with yt_dlp.YoutubeDL({'quiet': True, 'noplaylist': True}) as ydl:
                 info = ydl.extract_info(video_id, download=False)
