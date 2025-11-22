@@ -4,9 +4,9 @@ import re
 import uuid
 import sys
 import shutil
-import base64
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.helpers import escape_markdown
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters, CallbackContext,
     CallbackQueryHandler, ConversationHandler, PicklePersistence
@@ -122,11 +122,12 @@ async def download_get_url(update: Update, context: CallbackContext):
             InlineKeyboardButton("🎬 Video", callback_data=f"dl_url:video:{video_id}")
         ]]
 
+        safe_title = escape_markdown(title, version=2)
         await update.message.reply_photo(
             photo=thumbnail,
-            caption=f"Pilih format untuk:\n*{title}*",
+            caption=f"Pilih format untuk:\n*{safe_title}*",
             reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
+            parse_mode='MarkdownV2'
         )
     except Exception as e:
         logger.error(f"Gagal memproses URL {url}: {e}", exc_info=True)
@@ -169,14 +170,13 @@ async def _display_search_page(update: Update, context: CallbackContext, query: 
         has_next_page = len(all_entries) > end_index
         page_results = all_entries[start_index:end_index]
 
-        # Simpan kata kunci di dalam teks pesan
-        message_text = f"Hasil pencarian untuk: `{query}`\n\n"
+        message_text = f"Hasil pencarian untuk: `{escape_markdown(query, version=2)}`\n\n"
         keyboard_buttons, row = [], []
         for i, entry in enumerate(page_results):
             num_on_page = i + 1
             duration = f"{(int(entry.get('duration', 0)) // 60):02d}:{(int(entry.get('duration', 0)) % 60):02d}"
-            message_text += f"{num_on_page}. ({duration}) `{entry['title']}`\n\n"
-            # Sertakan nomor halaman untuk tombol kembali
+            safe_title = escape_markdown(entry.get('title', 'Tanpa Judul'), version=2)
+            message_text += f"{num_on_page}. ({duration}) *{safe_title}*\n\n"
             row.append(InlineKeyboardButton(str(num_on_page), callback_data=f"search:select:{entry['id']}:{page}"))
             if len(row) >= 5:
                 keyboard_buttons.append(row)
@@ -194,9 +194,9 @@ async def _display_search_page(update: Update, context: CallbackContext, query: 
 
         reply_markup = InlineKeyboardMarkup(keyboard_buttons)
         if is_edit:
-            await update.callback_query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
+            await update.callback_query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='MarkdownV2')
         else:
-            await status_message.edit_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
+            await status_message.edit_text(message_text, reply_markup=reply_markup, parse_mode='MarkdownV2')
 
     except Exception as e:
         logger.error(f"Search display failed for query '{query}' on page {page}: {e}", exc_info=True)
@@ -207,13 +207,13 @@ async def _display_search_page(update: Update, context: CallbackContext, query: 
 
 
 async def _display_download_choice_search(update: Update, context: CallbackContext, video_id: str, page: int):
-    """Displays download choices and a stateless 'Back' button."""
     try:
         with yt_dlp.YoutubeDL({'quiet': True, 'noplaylist': True}) as ydl:
             info = ydl.extract_info(video_id, download=False)
 
         title = info.get('title', 'Tanpa Judul')
-        caption = f"Pilih format untuk:\n*{title}*"
+        safe_title = escape_markdown(title, version=2)
+        caption = f"Pilih format untuk:\n*{safe_title}*"
 
         keyboard = [
             [
@@ -226,200 +226,13 @@ async def _display_download_choice_search(update: Update, context: CallbackConte
         await update.callback_query.edit_message_text(
             caption,
             reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
+            parse_mode='MarkdownV2'
         )
     except Exception as e:
         logger.error(f"Failed to display download choice for video_id '{video_id}': {e}", exc_info=True)
         await update.callback_query.edit_message_text("❌ Terjadi kesalahan saat mengambil detail video.")
 
-    return CHOOSE_FORMATimport logging
-import os
-import re
-import uuid
-import sys
-import shutil
-import base64
-from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler, filters, CallbackContext,
-    CallbackQueryHandler, ConversationHandler, PicklePersistence
-)
-import yt_dlp
-from image_enhancer import enhance_photo
-from video_converter import convert_video_resolution, enhance_video_quality
-
-load_dotenv()
-logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-(
-    GET_URL, GET_SEARCH_QUERY, GET_SONG_TITLE, GET_PHOTO,
-    GET_ENHANCEMENT, GET_VIDEO, GET_PROCESS_ACTION, CHOOSE_FORMAT
-) = range(8)
-
-async def post_init(application: Application):
-    user_ids = application.bot_data.get('user_ids', set())
-    for user_id in user_ids:
-        try:
-            await application.bot.send_message(chat_id=user_id, text="BOT ONLINE ✅")
-        except Exception as e:
-            logger.warning(f"Could not send online message to {user_id}: {e}")
-
-def run_pre_flight_checks():
-    logger.info("--- 🩺 Running Pre-flight Checks ---")
-    if not (os.getenv("TELEGRAM_TOKEN") and os.getenv("TELEGRAM_TOKEN") != "GANTI_DENGAN_TOKEN_ANDA"):
-        logger.critical("FATAL: TELEGRAM_TOKEN not configured.")
-        return False
-    if not shutil.which("ffmpeg"):
-        logger.critical("FATAL: ffmpeg not found in PATH.")
-        return False
-    logger.info("[✅] All checks passed.")
-    return True
-
-async def download_media(identifier: str, format_choice: str, effective_message):
-    status_message = await effective_message.reply_text("⏳ Memproses...")
-    download_dir = 'downloads'
-    os.makedirs(download_dir, exist_ok=True)
-
-    ydl_opts = {
-        'outtmpl': os.path.join(download_dir, '%(id)s.%(ext)s'),
-        'noplaylist': True, 'quiet': True
-    }
-    if format_choice == 'audio':
-        ydl_opts.update({'format': 'bestaudio/best', 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}]})
-    else:
-        ydl_opts.update({'format': 'bestvideo+bestaudio/best'})
-
-    path, base_path = "", ""
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(identifier, download=True)
-            base_path = ydl.prepare_filename(info)
-
-        path = os.path.splitext(base_path)[0] + '.mp3' if format_choice == 'audio' else base_path
-        if not os.path.exists(path): raise FileNotFoundError(f"File not found: {path}")
-
-        filename = f"{re.sub(r'[\\/*?:\"<>|]', '', info.get('title', 'media'))}.{'mp3' if format_choice == 'audio' else info.get('ext', 'mp4')}"
-
-        with open(path, 'rb') as f:
-            if format_choice == 'audio':
-                await effective_message.reply_audio(f, title=info.get('title'), filename=filename, caption=info.get('title'))
-            else:
-                await effective_message.reply_video(f, filename=filename, caption=info.get('title'))
-    except Exception as e:
-        logger.error(f"Download failed for '{identifier}': {e}", exc_info=True)
-        await effective_message.reply_text(f"❌ Gagal: Link tidak didukung atau error internal.")
-    finally:
-        if status_message: await status_message.delete()
-        for p in [path, base_path]:
-            if p and os.path.exists(p): os.remove(p)
-
-async def cancel(update: Update, context: CallbackContext):
-    context.user_data.clear()
-    await update.message.reply_text("Operasi dibatalkan.")
-    return ConversationHandler.END
-
-async def start(update: Update, context: CallbackContext):
-    context.bot_data.setdefault('user_ids', set()).add(update.effective_chat.id)
-    await update.message.reply_html(f"👋 Halo {update.effective_user.mention_html()}! /help untuk bantuan.")
-
-async def collect_user_id(update: Update, context: CallbackContext):
-    """Collects user IDs silently in the background without replying."""
-    context.bot_data.setdefault('user_ids', set()).add(update.effective_chat.id)
-
-async def help_command(update: Update, context: CallbackContext):
-    await update.message.reply_markdown("...")
-
-async def download_start(update: Update, context: CallbackContext):
-    await update.message.reply_text("Kirimkan URL.")
-    return GET_URL
-
-async def download_get_url(update: Update, context: CallbackContext):
-    url = update.message.text
-    if not re.match(r'https?://\S+', url):
-        await update.message.reply_text("URL tidak valid. /cancel untuk batal.")
-        return GET_URL
-
-    try:
-        with yt_dlp.YoutubeDL({'quiet': True, 'noplaylist': True}) as ydl: info = ydl.extract_info(url, download=False)
-        context.user_data['url_info'] = {'url': url, 'title': info.get('title', 'Tanpa Judul')}
-        keyboard = [[InlineKeyboardButton("🎧 Audio", callback_data=f"dl_url:audio"), InlineKeyboardButton("🎬 Video", callback_data=f"dl_url:video")]]
-        await update.message.reply_photo(photo=info.get('thumbnail'), caption=f"Pilih format untuk:\n*{info.get('title')}*", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-    except Exception:
-        await download_media(url, 'video', update.message)
     return CHOOSE_FORMAT
-
-async def _display_search_page(update: Update, context: CallbackContext, query: str, page: int, is_edit: bool = False):
-    effective_message = update.message if not is_edit else update.callback_query.message
-    status_message_text = "⏳ Mencari..." if page == 0 else f"⏳ Mencari halaman {page + 1}..."
-
-    status_message = None
-    if is_edit:
-        try:
-            await update.callback_query.edit_message_text(status_message_text, reply_markup=None)
-        except Exception:
-            pass
-    else:
-        status_message = await effective_message.reply_text(status_message_text)
-
-    try:
-        results_per_page = 10
-        start_index = page * results_per_page
-        end_index = start_index + results_per_page
-
-        search_term = f"ytsearch{end_index + 1}:{query}"
-        ydl_opts = {'quiet': True, 'noplaylist': True, 'match_filter': 'duration < 600'}
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            result = ydl.extract_info(search_term, download=False)
-
-        all_entries = [e for e in result.get('entries', []) if e.get('duration')]
-
-        if not all_entries or len(all_entries) <= start_index:
-            message_text = "Tidak ada hasil lebih lanjut atau pencarian tidak valid."
-            if is_edit: await update.callback_query.edit_message_text(message_text)
-            else: await status_message.edit_text(message_text)
-            return
-
-        has_next_page = len(all_entries) > end_index
-        page_results = all_entries[start_index:end_index]
-
-        # Simpan kata kunci di dalam teks pesan
-        message_text = f"Hasil pencarian untuk: `{query}`\n\n"
-        keyboard_buttons, row = [], []
-        for i, entry in enumerate(page_results):
-            num_on_page = i + 1
-            duration = f"{(int(entry.get('duration', 0)) // 60):02d}:{(int(entry.get('duration', 0)) % 60):02d}"
-            message_text += f"{num_on_page}. ({duration}) `{entry['title']}`\n\n"
-            # Sertakan nomor halaman untuk tombol kembali
-            row.append(InlineKeyboardButton(str(num_on_page), callback_data=f"search:select:{entry['id']}:{page}"))
-            if len(row) >= 5:
-                keyboard_buttons.append(row)
-                row = []
-        if row: keyboard_buttons.append(row)
-
-        nav_row = []
-        if page > 0:
-            nav_row.append(InlineKeyboardButton("<<", callback_data=f"search:page:{page - 1}"))
-        nav_row.append(InlineKeyboardButton(f"Hal {page + 1}", callback_data="search:noop"))
-        if has_next_page:
-            nav_row.append(InlineKeyboardButton(">>", callback_data=f"search:page:{page + 1}"))
-        keyboard_buttons.append(nav_row)
-        keyboard_buttons.append([InlineKeyboardButton("❌ Tutup", callback_data="search:cancel")])
-
-        reply_markup = InlineKeyboardMarkup(keyboard_buttons)
-        if is_edit:
-            await update.callback_query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
-        else:
-            await status_message.edit_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
-
-    except Exception as e:
-        logger.error(f"Search display failed for query '{query}' on page {page}: {e}", exc_info=True)
-        error_message = "❌ Terjadi kesalahan saat melakukan pencarian."
-        if is_edit: await update.callback_query.edit_message_text(error_message)
-        elif status_message: await status_message.edit_text(error_message)
-        else: await effective_message.reply_text(error_message)
 
 async def search_start(update: Update, context: CallbackContext):
     await update.message.reply_text("Apa yang ingin dicari?")
@@ -432,7 +245,9 @@ async def search_get_query(update: Update, context: CallbackContext):
 
 def _extract_query_from_message(text: str) -> str or None:
     match = re.search(r"Hasil pencarian untuk: `(.*?)`", text)
-    return match.group(1) if match else None
+    if match:
+        return re.sub(r'\\(.)', r'\1', match.group(1))
+    return None
 
 async def search_callback_handler(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -441,9 +256,10 @@ async def search_callback_handler(update: Update, context: CallbackContext):
     parts = query.data.split(':')
     action = parts[1]
 
-    search_query = _extract_query_from_message(query.message.text_markdown)
+    search_query = _extract_query_from_message(query.message.text_markdown_v2)
+
     if not search_query:
-        await query.edit_message_text("❌ Error: Tidak dapat menemukan kata kunci pencarian asli. Sesi mungkin terlalu lama.")
+        await query.edit_message_text("❌ Error: Sesi pencarian ini sudah tidak valid. Silakan /search lagi.")
         return ConversationHandler.END
 
     if action == 'page':
@@ -523,29 +339,37 @@ async def download_callback_handler(update: Update, context: CallbackContext):
     parts = query.data.split(':')
     data_type, action, video_id = parts[0], parts[1], parts[2]
 
-    identifier, title = video_id, "media"
+    identifier = video_id # Identifier is always the video_id for simplicity
 
+    # Flow untuk /download (pakai URL) - stateful
     if data_type == 'dl_url':
         url_info = context.user_data.get('url_info')
         if not url_info or url_info.get('id') != video_id:
             await query.message.edit_text("Error: Sesi unduhan URL kedaluwarsa. Silakan mulai lagi /download.")
             return ConversationHandler.END
-        identifier, title = url_info['url'], url_info['title']
-        await query.message.edit_text(f"⏳ Memulai unduhan untuk *{title}*...", parse_mode='Markdown')
+
+        identifier = url_info['url'] # Use the full URL for more reliability
+        title = url_info['title']
+        safe_title = escape_markdown(title, version=2)
+
+        await query.message.edit_text(f"⏳ Memulai unduhan untuk *{safe_title}*...", parse_mode='MarkdownV2')
         await download_media(identifier, action, query.message)
         return ConversationHandler.END
 
+    # Flow untuk /search - stateless
     elif data_type == 'dl_search':
+        title = "Video Pilihan"
         try:
             with yt_dlp.YoutubeDL({'quiet': True, 'noplaylist': True}) as ydl:
                 info = ydl.extract_info(video_id, download=False)
                 title = info.get('title', 'Video Pilihan')
-        except Exception:
-            title = "Video Pilihan"
+        except Exception as e:
+            logger.warning(f"Could not fetch title for {video_id} in callback: {e}")
 
-        status_message = await context.bot.send_message(chat_id=query.message.chat_id, text=f"⏳ Mengunduh *{title}*...", parse_mode='Markdown')
+        safe_title = escape_markdown(title, version=2)
+        status_message = await context.bot.send_message(chat_id=query.message.chat_id, text=f"⏳ Mengunduh *{safe_title}*...", parse_mode='MarkdownV2')
         await download_media(identifier, action, query.message)
-        await status_message.delete()
+        if status_message: await status_message.delete()
 
     return CHOOSE_FORMAT
 async def photo_enhancement_handler(update: Update, context: CallbackContext):
