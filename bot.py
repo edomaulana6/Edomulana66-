@@ -196,7 +196,8 @@ async def _display_search_page(update: Update, context: CallbackContext, query: 
         keyboard_buttons, row = [], []
         for i, entry in enumerate(page_results):
             num_on_page = i + 1
-            duration = f"{(int(entry.get('duration', 0)) // 60):02d}:{(int(entry.get('duration', 0)) % 60):02d}"
+            duration_in_seconds = int(entry.get('duration', 0))
+            duration = f"{(duration_in_seconds // 60):02d}:{(duration_in_seconds % 60):02d}"
             safe_title = escape_markdown(entry.get('title', 'Tanpa Judul'), version=2)
             message_text += f"{num_on_page}. ({duration}) *{safe_title}*\n\n"
             row.append(InlineKeyboardButton(str(num_on_page), callback_data=f"search:select:{entry['id']}:{page}"))
@@ -321,7 +322,7 @@ async def song_get_title(update: Update, context: CallbackContext):
             video_info = result.get('entries', [result])[0]
 
             # --- Filter Durasi Manual ---
-            duration = video_info.get('duration', 9999)
+            duration = int(video_info.get('duration', 9999))
             if duration > 600:
                 await status_message.edit_text("❌ Gagal: Lagu ditemukan, tetapi durasinya lebih dari 10 menit.")
                 return ConversationHandler.END
