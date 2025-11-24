@@ -43,42 +43,64 @@ def run_pre_flight_checks():
     logger.info("[✅] All checks passed.")
     return True
 
-async def download_media(identifier: str, format_choice: str, effective_message):
+async def download_media(identifier: str, format_choice: str, effective_message, ydl_opts_override=None):
     status_message = await effective_message.reply_text("⏳ Memproses...")
     download_dir = 'downloads'
     os.makedirs(download_dir, exist_ok=True)
 
-    ydl_opts = {
+    final_ydl_opts = {
         'outtmpl': os.path.join(download_dir, '%(id)s.%(ext)s'),
-        'noplaylist': True, 'quiet': True
+        'noplaylist': True,
+        'quiet': True,
+        'noprogress': True,
     }
-    if format_choice == 'audio':
-        ydl_opts.update({'format': 'bestaudio/best', 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}]})
-    else:
-        ydl_opts.update({'format': 'bestvideo+bestaudio/best'})
 
-    path, base_path = "", ""
+    if format_choice == 'audio':
+        final_ydl_opts.update({'format': 'bestaudio/best', 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}]})
+    else:
+        final_ydl_opts.update({'format': 'bestvideo+bestaudio/best'})
+
+    if ydl_opts_override:
+        final_ydl_opts.update(ydl_opts_override)
+
+    path, base_path, enhanced_path = "", "", ""
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(final_ydl_opts) as ydl:
             info = ydl.extract_info(identifier, download=True)
             base_path = ydl.prepare_filename(info)
 
-        path = os.path.splitext(base_path)[0] + '.mp3' if format_choice == 'audio' else base_path
-        if not os.path.exists(path): raise FileNotFoundError(f"File not found: {path}")
+        path_ext = '.mp3' if format_choice == 'audio' and final_ydl_opts.get('postprocessors') else f".{info.get('ext', 'mp4')}"
+        path = os.path.splitext(base_path)[0] + path_ext
 
-        filename = f"{re.sub(r'[\\/*?:\"<>|]', '', info.get('title', 'media'))}.{'mp3' if format_choice == 'audio' else info.get('ext', 'mp4')}"
+        if not os.path.exists(path):
+             raise FileNotFoundError(f"File hasil unduhan tidak ditemukan di {path}")
+
+        title = info.get('title', 'media')
+        safe_title = re.sub(r'[\\/*?:"<>|]', '', title)
+        filename = f"{safe_title}{path_ext}"
 
         with open(path, 'rb') as f:
             if format_choice == 'audio':
-                await effective_message.reply_audio(f, title=info.get('title'), filename=filename, caption=info.get('title'))
+                await effective_message.reply_audio(f, title=title, filename=filename, caption=title)
             else:
-                await effective_message.reply_video(f, filename=filename, caption=info.get('title'))
-    except Exception as e:
+                await effective_message.reply_video(f, filename=filename, caption=title)
+
+    except yt_dlp.utils.DownloadError as e:
         logger.error(f"Download failed for '{identifier}': {e}", exc_info=True)
-        await effective_message.reply_text(f"❌ Gagal: Link tidak didukung atau error internal.")
+        # Berikan pesan error yang lebih spesifik jika memungkinkan
+        if "is not a valid URL" in str(e):
+             await effective_message.reply_text(f"❌ Gagal: Link tidak valid.")
+        elif "Unsupported URL" in str(e):
+            await effective_message.reply_text(f"❌ Gagal: Link tidak didukung.")
+        else:
+            await effective_message.reply_text(f"❌ Gagal: Terjadi kesalahan saat mengunduh.")
+    except Exception as e:
+        logger.error(f"An unexpected error occurred for '{identifier}': {e}", exc_info=True)
+        await effective_message.reply_text(f"❌ Gagal: Terjadi error internal yang tidak terduga.")
+
     finally:
         if status_message: await status_message.delete()
-        for p in [path, base_path]:
+        for p in [path, base_path, enhanced_path]:
             if p and os.path.exists(p): os.remove(p)
 
 async def cancel(update: Update, context: CallbackContext):
@@ -284,54 +306,186 @@ async def song_start(update: Update, context: CallbackContext):
 async def song_get_title(update: Update, context: CallbackContext):
     status_message = await update.message.reply_text("⏳ Mencari lagu...")
     try:
-        search_query = f"ytmusic1:{update.message.text}"
-        ydl_opts = {'quiet': True, 'noplaylist': True, 'match_filter': 'duration < 600'}
+        # Gunakan default_search untuk ytmusic, dan filter manual setelahnya.
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'default_search': 'ytmusic',
+            'quiet': True,
+            'noplaylist': True,
+        }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            result = ydl.extract_info(search_query, download=False)
-            if not result.get('entries'):
-                await update.message.reply_text("Tidak ada lagu yang cocok dengan filter durasi.")
-                if status_message: await status_message.delete()
+            # Cari satu video saja, jangan download dulu
+            result = ydl.extract_info(update.message.text, download=False)
+
+            # Ambil entri pertama jika ada
+            video_info = result.get('entries', [result])[0]
+
+            # --- Filter Durasi Manual ---
+            duration = video_info.get('duration', 9999)
+            if duration > 600:
+                await status_message.edit_text("❌ Gagal: Lagu ditemukan, tetapi durasinya lebih dari 10 menit.")
                 return ConversationHandler.END
 
-        video_url = result['entries'][0]['webpage_url']
-        if status_message: await status_message.delete()
+        # Jika lolos filter, baru unduh menggunakan URL-nya
+        video_url = video_info['webpage_url']
+        await status_message.delete() # Hapus "Mencari..." sebelum memulai unduhan
         await download_media(video_url, 'audio', update.message)
+
     except Exception as e:
         logger.error(f"Song search failed for '{update.message.text}': {e}", exc_info=True)
         if status_message: await status_message.delete()
-        await update.message.reply_text(f"❌ Gagal: Terjadi error saat mencari lagu.")
+        await update.message.reply_text(f"❌ Gagal: Tidak dapat menemukan lagu atau terjadi error.")
 
     return ConversationHandler.END
 
-# ... (sisa fungsi enhance_photo dan convert_video tetap sama) ...
 async def enhance_photo_start(update: Update, context: CallbackContext):
     await update.message.reply_text("Kirim foto (atau file gambar).")
     return GET_PHOTO
+
 async def get_photo(update: Update, context: CallbackContext):
-    file = await (update.message.photo[-1] if update.message.photo else update.message.document).get_file()
-    os.makedirs('downloads', exist_ok=True)
-    path = os.path.join('downloads', f"{uuid.uuid4()}.jpg")
-    await file.download_to_drive(path)
-    context.user_data['photo_path'] = path
-    keyboard = [[InlineKeyboardButton("Tajamkan", callback_data="enhance:sharpen"), InlineKeyboardButton("Kontras", callback_data="enhance:contrast")]]
-    await update.message.reply_text("Pilih peningkatan:", reply_markup=InlineKeyboardMarkup(keyboard))
-    return GET_ENHANCEMENT
+    status_message = await update.message.reply_text("⏳ Mengunduh foto...")
+    try:
+        if update.message.photo:
+            file = await update.message.photo[-1].get_file()
+        elif update.message.document and update.message.document.mime_type.startswith('image'):
+            file = await update.message.document.get_file()
+        else:
+            await status_message.edit_text("❌ File tidak valid. Mohon kirim gambar.")
+            return GET_PHOTO
+
+        os.makedirs('downloads', exist_ok=True)
+        path = os.path.join('downloads', f"photo_{uuid.uuid4()}.jpg")
+        await file.download_to_drive(path)
+        context.user_data['photo_path'] = path
+
+        keyboard = [[
+            InlineKeyboardButton("Auto Enhance", callback_data="enhance:auto"),
+            InlineKeyboardButton("Sharpen", callback_data="enhance:sharpen"),
+            InlineKeyboardButton("Contrast", callback_data="enhance:contrast")
+        ]]
+        await status_message.edit_text("Pilih jenis peningkatan:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return GET_ENHANCEMENT
+    except Exception as e:
+        logger.error(f"Failed to get photo: {e}", exc_info=True)
+        await status_message.edit_text("❌ Terjadi kesalahan saat memproses foto.")
+        return ConversationHandler.END
+
+async def photo_enhancement_handler(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+
+    enhancement_type = query.data.split(':')[1]
+    photo_path = context.user_data.get('photo_path')
+
+    if not photo_path or not os.path.exists(photo_path):
+        await query.edit_message_text("❌ Error: File foto tidak ditemukan. Sesi mungkin kedaluwarsa.")
+        return ConversationHandler.END
+
+    await query.edit_message_text(f"⏳ Menerapkan peningkatan '{enhancement_type}'...")
+
+    try:
+        enhanced_path = enhance_photo(photo_path, enhancement_type)
+
+        with open(enhanced_path, 'rb') as f:
+            await context.bot.send_document(
+                chat_id=query.message.chat_id,
+                document=f,
+                filename=f"enhanced_{os.path.basename(photo_path)}",
+                caption=f"✅ Foto berhasil ditingkatkan ({enhancement_type})."
+            )
+    except Exception as e:
+        logger.error(f"Photo enhancement failed for {photo_path}: {e}", exc_info=True)
+        await query.message.reply_text("❌ Terjadi kesalahan saat meningkatkan kualitas foto.")
+    finally:
+        await query.message.delete()
+        for path in [photo_path, enhanced_path if 'enhanced_path' in locals() else None]:
+             if path and os.path.exists(path):
+                os.remove(path)
+        context.user_data.clear()
+
+    return ConversationHandler.END
+
 async def convert_video_start(update: Update, context: CallbackContext):
     await update.message.reply_text("Kirim video (atau file video).")
     return GET_VIDEO
+
 async def get_video(update: Update, context: CallbackContext):
-    file = await (update.message.video or update.message.document).get_file()
-    os.makedirs('downloads', exist_ok=True)
-    path = os.path.join('downloads', f"vid_{uuid.uuid4()}.mp4")
-    await file.download_to_drive(path)
-    context.user_data['video_path'] = path
-    keyboard = [
-        [InlineKeyboardButton("✨ Tingkatkan Kualitas", callback_data="convert:enhance_quality")],
-        [InlineKeyboardButton("4k", callback_data="convert:4k"), InlineKeyboardButton("2k", callback_data="convert:2k")],
-        [InlineKeyboardButton("1080p", callback_data="convert:1080p"), InlineKeyboardButton("720p", callback_data="convert:720p")]
-    ]
-    await update.message.reply_text("Pilih tindakan:", reply_markup=InlineKeyboardMarkup(keyboard))
-    return GET_PROCESS_ACTION
+    status_message = await update.message.reply_text("⏳ Mengunduh video...")
+    try:
+        if update.message.video:
+            file = await update.message.video.get_file()
+            original_filename = update.message.video.file_name
+        elif update.message.document and update.message.document.mime_type.startswith('video'):
+            file = await update.message.document.get_file()
+            original_filename = update.message.document.file_name
+        else:
+            await status_message.edit_text("❌ File tidak valid. Mohon kirim video.")
+            return GET_VIDEO
+
+        os.makedirs('downloads', exist_ok=True)
+
+        ext = os.path.splitext(original_filename)[1] if original_filename else '.mp4'
+        path = os.path.join('downloads', f"vid_{uuid.uuid4()}{ext}")
+
+        await file.download_to_drive(path)
+        context.user_data['video_path'] = path
+
+        keyboard = [
+            [InlineKeyboardButton("✨ Tingkatkan Kualitas (CRF 18)", callback_data="convert:enhance_quality")],
+            [InlineKeyboardButton("2160p (4k)", callback_data="convert:2160p"), InlineKeyboardButton("1440p (2k)", callback_data="convert:1440p")],
+            [InlineKeyboardButton("1080p", callback_data="convert:1080p"), InlineKeyboardButton("720p", callback_data="convert:720p")]
+        ]
+        await status_message.edit_text("Pilih tindakan:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return GET_PROCESS_ACTION
+    except Exception as e:
+        logger.error(f"Failed to get video: {e}", exc_info=True)
+        await status_message.edit_text("❌ Terjadi kesalahan saat memproses video.")
+        return ConversationHandler.END
+
+async def video_processing_handler(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+
+    action = query.data.split(':')[1]
+    video_path = context.user_data.get('video_path')
+
+    if not video_path or not os.path.exists(video_path):
+        await query.edit_message_text("❌ Error: File video tidak ditemukan. Sesi mungkin kedaluwarsa.")
+        return ConversationHandler.END
+
+    if action == 'enhance_quality':
+        await query.edit_message_text("⏳ Meningkatkan kualitas video...")
+        output_path = enhance_video_quality(video_path)
+        caption = "✅ Kualitas video berhasil ditingkatkan."
+    else:
+        resolution = action
+        await query.edit_message_text(f"⏳ Mengonversi video ke {resolution}...")
+        output_path = convert_video_resolution(video_path, resolution)
+        caption = f"✅ Video berhasil dikonversi ke {resolution}."
+
+    try:
+        if not output_path:
+             raise ValueError("Proses video gagal menghasilkan output.")
+
+        with open(output_path, 'rb') as f:
+            await context.bot.send_video(
+                chat_id=query.message.chat_id,
+                video=f,
+                caption=caption,
+                write_timeout=60
+            )
+    except Exception as e:
+        logger.error(f"Video processing/sending failed for {video_path}: {e}", exc_info=True)
+        await query.message.reply_text(f"❌ Terjadi kesalahan: {e}")
+    finally:
+        await query.message.delete()
+        for path in [video_path, output_path if 'output_path' in locals() else None]:
+            if path and os.path.exists(path):
+                os.remove(path)
+        context.user_data.clear()
+
+    return ConversationHandler.END
+
 async def download_callback_handler(update: Update, context: CallbackContext):
     query = update.callback_query
     await query.answer()
@@ -339,16 +493,15 @@ async def download_callback_handler(update: Update, context: CallbackContext):
     parts = query.data.split(':')
     data_type, action, video_id = parts[0], parts[1], parts[2]
 
-    identifier = video_id # Identifier is always the video_id for simplicity
+    identifier = video_id
 
-    # Flow untuk /download (pakai URL) - stateful
     if data_type == 'dl_url':
         url_info = context.user_data.get('url_info')
         if not url_info or url_info.get('id') != video_id:
             await query.message.edit_text("Error: Sesi unduhan URL kedaluwarsa. Silakan mulai lagi /download.")
             return ConversationHandler.END
 
-        identifier = url_info['url'] # Use the full URL for more reliability
+        identifier = url_info['url']
         title = url_info['title']
         safe_title = escape_markdown(title, version=2)
 
@@ -356,7 +509,6 @@ async def download_callback_handler(update: Update, context: CallbackContext):
         await download_media(identifier, action, query.message)
         return ConversationHandler.END
 
-    # Flow untuk /search - stateless
     elif data_type == 'dl_search':
         title = "Video Pilihan"
         try:
@@ -372,12 +524,6 @@ async def download_callback_handler(update: Update, context: CallbackContext):
         if status_message: await status_message.delete()
 
     return CHOOSE_FORMAT
-async def photo_enhancement_handler(update: Update, context: CallbackContext):
-    # ...
-    return ConversationHandler.END
-async def video_processing_handler(update: Update, context: CallbackContext):
-    # ...
-    return ConversationHandler.END
 
 def main():
     if not run_pre_flight_checks(): sys.exit(1)
@@ -403,7 +549,14 @@ def main():
         **conv_defaults
     ))
     app.add_handler(ConversationHandler(entry_points=[CommandHandler("song", song_start)], states={GET_SONG_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, song_get_title)]}, **conv_defaults))
-    app.add_handler(ConversationHandler(entry_points=[CommandHandler("enhance_photo", enhance_photo_start)], states={GET_PHOTO: [MessageHandler(filters.PHOTO | filters.Document.IMAGE, get_photo)], GET_ENHANCEMENT: [CallbackQueryHandler(photo_enhancement_handler, pattern="^enhance:")]}, **conv_defaults))
+    app.add_handler(ConversationHandler(
+        entry_points=[CommandHandler("enhance_photo", enhance_photo_start)],
+        states={
+            GET_PHOTO: [MessageHandler(filters.PHOTO | filters.Document.IMAGE, get_photo)],
+            GET_ENHANCEMENT: [CallbackQueryHandler(photo_enhancement_handler, pattern="^enhance:")]
+        },
+        **conv_defaults
+    ))
     app.add_handler(ConversationHandler(
         entry_points=[CommandHandler("convert_video", convert_video_start)],
         states={
