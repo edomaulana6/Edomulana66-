@@ -155,120 +155,106 @@ async def download_get_url(update: Update, context: CallbackContext):
 
     return CHOOSE_FORMAT
 
-async def _display_search_page(update: Update, context: CallbackContext, query: str, page: int, is_edit: bool = False):
+async def _display_search_page(update: Update, context: CallbackContext, page: int, is_edit: bool = False):
+    """Displays a single page of search results from context.user_data."""
     effective_message = update.message if not is_edit else update.callback_query.message
-    status_message_text = "⏳ Mencari..." if page == 0 else f"⏳ Mencari halaman {page + 1}..."
-
-    status_message = None
-    if is_edit:
-        try:
-            await update.callback_query.edit_message_text(status_message_text, reply_markup=None)
-        except Exception:
-            pass
-    else:
-        status_message = await effective_message.reply_text(status_message_text)
+    query_obj = update.callback_query if is_edit else None
 
     try:
-        results_per_page = 10
-        start_index = page * results_per_page
-        end_index = start_index + results_per_page
+        all_entries = context.user_data.get('search_results', [])
+        search_query = context.user_data.get('search_query', '')
 
-        search_term = f"ytsearch{end_index + 1}:{query}"
-        ydl_opts = {'quiet': True, 'noplaylist': True, 'match_filter': 'duration < 600'}
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            result = ydl.extract_info(search_term, download=False)
-
-        all_entries = [e for e in result.get('entries', []) if e.get('duration')]
-
-        if not all_entries or len(all_entries) <= start_index:
-            message_text = "Tidak ada hasil lebih lanjut atau pencarian tidak valid."
-            if is_edit: await update.callback_query.edit_message_text(message_text)
-            else: await status_message.edit_text(message_text)
+        if not all_entries:
+            msg = "❌ Tidak ada hasil ditemukan atau sesi telah berakhir."
+            if is_edit: await query_obj.edit_message_text(msg)
+            else: await effective_message.reply_text(msg)
             return
 
-        has_next_page = len(all_entries) > end_index
-        page_results = all_entries[start_index:end_index]
+        results_per_page = 10
+        start_index = page * results_per_page
 
-        message_text = f"Hasil pencarian untuk: `{escape_markdown(query, version=2)}`\n\n"
+        if start_index >= len(all_entries):
+            await query_obj.answer("Tidak ada halaman lagi.")
+            return
+
+        page_results = all_entries[start_index : start_index + results_per_page]
+        has_next_page = (start_index + results_per_page) < len(all_entries)
+
+        message_text = f"Hasil pencarian untuk: `{escape_markdown(search_query, version=2)}`\n\n"
         keyboard_buttons, row = [], []
+
         for i, entry in enumerate(page_results):
-            num_on_page = i + 1
+            list_number = start_index + i + 1
             duration_in_seconds = int(entry.get('duration', 0))
             duration = f"{(duration_in_seconds // 60):02d}:{(duration_in_seconds % 60):02d}"
             safe_title = escape_markdown(entry.get('title', 'Tanpa Judul'), version=2)
-            message_text += f"{num_on_page}. ({duration}) *{safe_title}*\n\n"
-            row.append(InlineKeyboardButton(str(num_on_page), callback_data=f"search:select:{entry['id']}:{page}"))
-            if len(row) >= 5:
+            message_text += f"{list_number}. ({duration}) *{safe_title}*\n\n"
+
+        for i, entry in enumerate(page_results):
+            list_number = start_index + i + 1
+            row.append(InlineKeyboardButton(f"🎧 {list_number}", callback_data=f"dl_search:audio:{entry['id']}"))
+            row.append(InlineKeyboardButton(f"🎬 {list_number}", callback_data=f"dl_search:video:{entry['id']}"))
+            if (i + 1) % 2 == 0:
                 keyboard_buttons.append(row)
                 row = []
         if row: keyboard_buttons.append(row)
 
         nav_row = []
         if page > 0:
-            nav_row.append(InlineKeyboardButton("<<", callback_data=f"search:page:{page - 1}"))
-        nav_row.append(InlineKeyboardButton(f"Hal {page + 1}", callback_data="search:noop"))
+            nav_row.append(InlineKeyboardButton("<< Sebelumnya", callback_data=f"search:page:{page - 1}"))
         if has_next_page:
-            nav_row.append(InlineKeyboardButton(">>", callback_data=f"search:page:{page + 1}"))
-        keyboard_buttons.append(nav_row)
+            nav_row.append(InlineKeyboardButton("Berikutnya >>", callback_data=f"search:page:{page + 1}"))
+        if nav_row: keyboard_buttons.append(nav_row)
+
         keyboard_buttons.append([InlineKeyboardButton("❌ Tutup", callback_data="search:cancel")])
 
         reply_markup = InlineKeyboardMarkup(keyboard_buttons)
+
         if is_edit:
-            await update.callback_query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='MarkdownV2')
+             await query_obj.edit_message_text(message_text, reply_markup=reply_markup, parse_mode='MarkdownV2')
         else:
-            await status_message.edit_text(message_text, reply_markup=reply_markup, parse_mode='MarkdownV2')
+            await effective_message.edit_text(message_text, reply_markup=reply_markup, parse_mode='MarkdownV2')
 
     except Exception as e:
-        logger.error(f"Search display failed for query '{query}' on page {page}: {e}", exc_info=True)
-        error_message = "❌ Terjadi kesalahan saat melakukan pencarian."
-        if is_edit: await update.callback_query.edit_message_text(error_message)
-        elif status_message: await status_message.edit_text(error_message)
-        else: await effective_message.reply_text(error_message)
-
-
-async def _display_download_choice_search(update: Update, context: CallbackContext, video_id: str, page: int):
-    try:
-        with yt_dlp.YoutubeDL({'quiet': True, 'noplaylist': True}) as ydl:
-            info = ydl.extract_info(video_id, download=False)
-
-        title = info.get('title', 'Tanpa Judul')
-        safe_title = escape_markdown(title, version=2)
-        caption = f"Pilih format untuk:\n*{safe_title}*"
-
-        keyboard = [
-            [
-                InlineKeyboardButton("🎧 Audio", callback_data=f"dl_search:audio:{video_id}"),
-                InlineKeyboardButton("🎬 Video", callback_data=f"dl_search:video:{video_id}")
-            ],
-            [InlineKeyboardButton("⬅️ Kembali", callback_data=f"search:page:{page}")]
-        ]
-
-        await update.callback_query.edit_message_text(
-            caption,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='MarkdownV2'
-        )
-    except Exception as e:
-        logger.error(f"Failed to display download choice for video_id '{video_id}': {e}", exc_info=True)
-        await update.callback_query.edit_message_text("❌ Terjadi kesalahan saat mengambil detail video.")
-
-    return CHOOSE_FORMAT
+        logger.error(f"Search display failed for query '{search_query}' on page {page}: {e}", exc_info=True)
+        error_message = "❌ Terjadi kesalahan saat menampilkan hasil pencarian."
+        if is_edit: await query_obj.edit_message_text(error_message)
+        else: await effective_message.edit_text(error_message)
 
 async def search_start(update: Update, context: CallbackContext):
+    context.user_data.pop('search_results', None)
+    context.user_data.pop('search_query', None)
     await update.message.reply_text("Apa yang ingin dicari?")
     return GET_SEARCH_QUERY
 
 async def search_get_query(update: Update, context: CallbackContext):
     query = update.message.text
-    await _display_search_page(update, context, query=query, page=0, is_edit=False)
-    return CHOOSE_FORMAT
+    status_message = await update.message.reply_text(f"⏳ Mencari `{escape_markdown(query, version=2)}`...", parse_mode='MarkdownV2')
 
-def _extract_query_from_message(text: str) -> str or None:
-    match = re.search(r"Hasil pencarian untuk: `(.*?)`", text)
-    if match:
-        return re.sub(r'\\(.)', r'\1', match.group(1))
-    return None
+    try:
+        search_term = f"ytsearch50:{query}"
+        ydl_opts = {'quiet': True, 'noplaylist': True, 'match_filter': 'duration < 600'}
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            result = ydl.extract_info(search_term, download=False)
+
+        all_entries = [e for e in result.get('entries', []) if e and e.get('duration')]
+
+        if not all_entries:
+            await status_message.edit_text("❌ Tidak ada hasil yang ditemukan.")
+            return ConversationHandler.END
+
+        context.user_data['search_results'] = all_entries
+        context.user_data['search_query'] = query
+
+        await _display_search_page(update, context, page=0, is_edit=False)
+
+    except Exception as e:
+        logger.error(f"Initial deep search failed for query '{query}': {e}", exc_info=True)
+        await status_message.edit_text("❌ Terjadi kesalahan fatal saat melakukan pencarian.")
+        return ConversationHandler.END
+
+    return CHOOSE_FORMAT
 
 async def search_callback_handler(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -277,23 +263,18 @@ async def search_callback_handler(update: Update, context: CallbackContext):
     parts = query.data.split(':')
     action = parts[1]
 
-    search_query = _extract_query_from_message(query.message.text_markdown_v2)
-
-    if not search_query:
-        await query.edit_message_text("❌ Error: Sesi pencarian ini sudah tidak valid. Silakan /search lagi.")
+    if 'search_results' not in context.user_data:
+        await query.edit_message_text("❌ Sesi pencarian telah berakhir. Silakan /search lagi.")
         return ConversationHandler.END
 
     if action == 'page':
         page = int(parts[2])
-        await _display_search_page(update, context, query=search_query, page=page, is_edit=True)
-
-    elif action == 'select':
-        video_id = parts[2]
-        page = int(parts[3])
-        await _display_download_choice_search(update, context, video_id, page)
+        await _display_search_page(update, context, page=page, is_edit=True)
 
     elif action == 'cancel':
         await query.message.delete()
+        context.user_data.pop('search_results', None)
+        context.user_data.pop('search_query', None)
         return ConversationHandler.END
 
     return CHOOSE_FORMAT
@@ -305,13 +286,14 @@ async def song_start(update: Update, context: CallbackContext):
 async def song_get_title(update: Update, context: CallbackContext):
     status_message = await update.message.reply_text("⏳ Mencari lagu di YouTube Music...")
     try:
-        ydl_opts = {'quiet': True, 'noplaylist': True, 'default_search': 'ytmusic'}
+        search_term = f"ytmusic1:{update.message.text}"
+        ydl_opts = {'quiet': True, 'noplaylist': True}
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            result = ydl.extract_info(update.message.text, download=False)
+            result = ydl.extract_info(search_term, download=False)
 
-            # Handle kasus di mana hasil pencarian adalah playlist
-            video_info = result.get('entries', [result])[0]
+            # ytmusic1: always returns a playlist with one entry
+            video_info = result['entries'][0]
 
             duration = int(video_info.get('duration', 9999))
             if duration > 600:
